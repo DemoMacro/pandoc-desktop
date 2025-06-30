@@ -1,0 +1,32 @@
+{
+  "name": "pandoc-desktop",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "basis lint --all",
+    "postinstall": "basis git setup"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.6.0",
+    "@tauri-apps/plugin-dialog": "~2.3.0",
+    "vue": "3.5.17"
+  },
+  "devDependencies": {
+    "@funish/basis": "0.1.1",
+    "@prettier/plugin-oxc": "0.0.4",
+    "@tauri-apps/cli": "2.6.2",
+    "@types/node": "24.0.7",
+    "@vitejs/plugin-vue": "6.0.0",
+    "@vue/tsconfig": "0.7.0",
+    "oxlint": "1.4.0",
+    "prettier": "3.6.2",
+    "typescript": "~5.8.3",
+    "vite": "7.0.0",
+    "vue-tsc": "2.2.10"
+  },
+  "packageManager": "pnpm@10.12.1+sha512.f0dda8580f0ee9481c5c79a1d927b9164f2c478e90992ad268bbb2465a736984391d6333d2c327913578b2804af33474ca554ba29c04a8b13060a717675ae3ac"
+}
