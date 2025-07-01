@@ -1,16 +1,17 @@
 mod pandoc;
 mod types;
 mod utils;
-mod version_manager;
+mod manager;
 
 use pandoc::{
     check_pandoc_version, convert_with_pandoc, get_pandoc_info, get_pandoc_path,
     validate_pandoc_path, check_portable_pandoc, install_portable_pandoc, 
     get_pandoc_info_with_portable, setup_bundled_pandoc, get_bundled_pandoc_path,
 };
-use version_manager::{
+use manager::{
     download_pandoc, extract_pandoc_archive, get_latest_pandoc_release, get_pandoc_releases,
-    get_version_info,
+    get_version_info, discover_pandoc_sources, get_best_pandoc_manager, 
+    create_and_validate_custom_manager, update_bundled_pandoc, check_bundled_pandoc_update,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -40,7 +41,12 @@ pub fn run() {
             get_pandoc_releases,
             get_version_info,
             download_pandoc,
-            extract_pandoc_archive
+            extract_pandoc_archive,
+            discover_pandoc_sources,
+            get_best_pandoc_manager,
+            create_and_validate_custom_manager,
+            update_bundled_pandoc,
+            check_bundled_pandoc_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

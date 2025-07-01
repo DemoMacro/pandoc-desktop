@@ -65,7 +65,6 @@ const applyTheme = () => {
 
   document.documentElement.setAttribute("data-theme", actualTheme);
   saveSettings();
-  displayMessage(`Theme switched to ${selectedTheme.value}`, "success");
 };
 
 // Settings persistence

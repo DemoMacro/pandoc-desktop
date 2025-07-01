@@ -21,7 +21,7 @@
       @click="handleConvert"
       :disabled="!canConvert || isConverting"
       :aria-busy="isConverting"
-      :class="['primary', { converting: isConverting }]"
+      :class="['secondary', { converting: isConverting }]"
     >
       {{ isConverting ? "⏳ Converting..." : "🔄 Convert Document" }}
     </button>
@@ -73,10 +73,16 @@ const handleConvert = async () => {
 
 button {
   width: 100%;
+  transition: all 0.2s ease;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
 }
 
 .converting {
   cursor: wait;
   opacity: 0.8;
+  transform: none !important; /* Disable hover effect when converting */
 }
 </style>

@@ -1,7 +1,6 @@
 use crate::types::PandocInfo;
 use crate::utils::{get_search_paths, validate_pandoc_executable};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tauri::Manager;
 
 /// Get the portable Pandoc directory path
@@ -68,7 +67,7 @@ pub async fn check_portable_pandoc(app_handle: tauri::AppHandle) -> Result<bool,
 #[tauri::command]
 pub async fn install_portable_pandoc(app_handle: tauri::AppHandle) -> Result<String, String> {
     // Get latest release
-    let latest_release = crate::version_manager::get_latest_pandoc_release().await?;
+    let latest_release = crate::manager::get_latest_pandoc_release().await?;
     let version = latest_release.tag_name;
     
     // Get portable pandoc directory
@@ -79,14 +78,14 @@ pub async fn install_portable_pandoc(app_handle: tauri::AppHandle) -> Result<Str
         .map_err(|e| format!("Failed to create portable directory: {}", e))?;
     
     // Download pandoc to portable directory
-    let download_path = crate::version_manager::download_pandoc(
+    let download_path = crate::manager::download_pandoc(
         version.clone(), 
         portable_dir.to_string_lossy().to_string()
     ).await?;
     
     // Extract the archive
     let extract_dir = portable_dir.to_string_lossy().to_string();
-    let extracted_path = crate::version_manager::extract_pandoc_archive(
+    let extracted_path = crate::manager::extract_pandoc_archive(
         download_path, 
         extract_dir
     ).await?;
@@ -161,7 +160,7 @@ pub async fn get_pandoc_info(custom_path: Option<String>) -> Result<PandocInfo, 
     };
 
     // Check if pandoc exists and get version
-    let version_output = Command::new(&pandoc_cmd).arg("--version").output();
+    let version_output = crate::utils::create_hidden_command(&pandoc_cmd).arg("--version").output();
 
     match version_output {
         Ok(output) if output.status.success() => {
@@ -217,7 +216,7 @@ pub async fn validate_pandoc_path(path: String) -> Result<bool, String> {
         return Ok(false);
     }
 
-    let output = Command::new(&path).arg("--version").output();
+    let output = crate::utils::create_hidden_command(&path).arg("--version").output();
 
     match output {
         Ok(output) => Ok(output.status.success()),
@@ -227,37 +226,129 @@ pub async fn validate_pandoc_path(path: String) -> Result<bool, String> {
 
 /// Get supported input and output formats with improved error handling
 pub fn get_supported_formats(pandoc_cmd: &str) -> Result<(Vec<String>, Vec<String>), String> {
-    // Common fallback formats
+    // Real Pandoc 3.7.0.2 formats as fallback (based on actual output)
     let fallback_input_formats = vec![
-        "markdown".to_string(),
-        "html".to_string(),
-        "latex".to_string(),
-        "rst".to_string(),
-        "docx".to_string(),
-        "epub".to_string(),
-        "org".to_string(),
-        "textile".to_string(),
+        "biblatex".to_string(),
+        "bibtex".to_string(),
+        "bits".to_string(),
         "commonmark".to_string(),
+        "commonmark_x".to_string(),
+        "creole".to_string(),
+        "csljson".to_string(),
+        "csv".to_string(),
+        "djot".to_string(),
+        "docbook".to_string(),
+        "docx".to_string(),
+        "dokuwiki".to_string(),
+        "endnotexml".to_string(),
+        "epub".to_string(),
+        "fb2".to_string(),
         "gfm".to_string(),
+        "haddock".to_string(),
+        "html".to_string(),
+        "ipynb".to_string(),
+        "jats".to_string(),
+        "jira".to_string(),
         "json".to_string(),
+        "latex".to_string(),
+        "man".to_string(),
+        "markdown".to_string(),
+        "markdown_github".to_string(),
+        "markdown_mmd".to_string(),
+        "markdown_phpextra".to_string(),
+        "markdown_strict".to_string(),
+        "mdoc".to_string(),
+        "mediawiki".to_string(),
+        "muse".to_string(),
+        "native".to_string(),
+        "odt".to_string(),
+        "opml".to_string(),
+        "org".to_string(),
+        "pod".to_string(),
+        "ris".to_string(),
+        "rst".to_string(),
+        "rtf".to_string(),
+        "t2t".to_string(),
+        "textile".to_string(),
+        "tikiwiki".to_string(),
+        "tsv".to_string(),
+        "twiki".to_string(),
+        "typst".to_string(),
+        "vimwiki".to_string(),
     ];
 
     let fallback_output_formats = vec![
-        "html".to_string(),
-        "latex".to_string(),
-        "pdf".to_string(),
-        "docx".to_string(),
-        "epub".to_string(),
-        "rst".to_string(),
-        "markdown".to_string(),
-        "plain".to_string(),
-        "json".to_string(),
+        "ansi".to_string(),
+        "asciidoc".to_string(),
+        "asciidoc_legacy".to_string(),
+        "asciidoctor".to_string(),
+        "beamer".to_string(),
+        "biblatex".to_string(),
+        "bibtex".to_string(),
+        "chunkedhtml".to_string(),
         "commonmark".to_string(),
+        "commonmark_x".to_string(),
+        "context".to_string(),
+        "csljson".to_string(),
+        "djot".to_string(),
+        "docbook".to_string(),
+        "docbook4".to_string(),
+        "docbook5".to_string(),
+        "docx".to_string(),
+        "dokuwiki".to_string(),
+        "dzslides".to_string(),
+        "epub".to_string(),
+        "epub2".to_string(),
+        "epub3".to_string(),
+        "fb2".to_string(),
         "gfm".to_string(),
+        "haddock".to_string(),
+        "html".to_string(),
+        "html4".to_string(),
+        "html5".to_string(),
+        "icml".to_string(),
+        "ipynb".to_string(),
+        "jats".to_string(),
+        "jats_archiving".to_string(),
+        "jats_articleauthoring".to_string(),
+        "jats_publishing".to_string(),
+        "jira".to_string(),
+        "json".to_string(),
+        "latex".to_string(),
+        "man".to_string(),
+        "markdown".to_string(),
+        "markdown_github".to_string(),
+        "markdown_mmd".to_string(),
+        "markdown_phpextra".to_string(),
+        "markdown_strict".to_string(),
+        "markua".to_string(),
+        "mediawiki".to_string(),
+        "ms".to_string(),
+        "muse".to_string(),
+        "native".to_string(),
+        "odt".to_string(),
+        "opendocument".to_string(),
+        "opml".to_string(),
+        "org".to_string(),
+        "pdf".to_string(),
+        "plain".to_string(),
+        "pptx".to_string(),
+        "revealjs".to_string(),
+        "rst".to_string(),
+        "rtf".to_string(),
+        "s5".to_string(),
+        "slideous".to_string(),
+        "slidy".to_string(),
+        "tei".to_string(),
+        "texinfo".to_string(),
+        "textile".to_string(),
+        "typst".to_string(),
+        "xwiki".to_string(),
+        "zimwiki".to_string(),
     ];
 
-    // Try to get input formats, use fallback if fails
-    let input_formats = Command::new(pandoc_cmd)
+    // Try to get input formats with hidden window
+    let input_formats = crate::utils::create_hidden_command(pandoc_cmd)
         .args(&["--list-input-formats"])
         .output()
         .ok()
@@ -276,8 +367,8 @@ pub fn get_supported_formats(pandoc_cmd: &str) -> Result<(Vec<String>, Vec<Strin
         })
         .unwrap_or_else(|| fallback_input_formats.clone());
 
-    // Try to get output formats, use fallback if fails
-    let output_formats = Command::new(pandoc_cmd)
+    // Try to get output formats with hidden window
+    let output_formats = crate::utils::create_hidden_command(pandoc_cmd)
         .args(&["--list-output-formats"])
         .output()
         .ok()
@@ -407,7 +498,7 @@ pub async fn convert_with_pandoc(
     args.push(output_file.clone());
 
     // Execute conversion
-    let output = Command::new(&pandoc_cmd)
+    let output = crate::utils::create_hidden_command(&pandoc_cmd)
         .args(&args)
         .output()
         .map_err(|e| format!("Failed to execute pandoc at '{}': {}", pandoc_cmd, e))?;
@@ -446,7 +537,7 @@ fn check_available_pdf_engines() -> Vec<String> {
     let mut available = Vec::new();
     
     for engine in engines {
-        if Command::new(engine)
+        if crate::utils::create_hidden_command(engine)
             .arg("--version")
             .output()
             .map(|output| output.status.success())
@@ -543,7 +634,7 @@ pub async fn setup_bundled_pandoc(app_handle: tauri::AppHandle) -> Result<String
         if std::path::Path::new(&bundled_path).exists() {
             // Extract the bundled Pandoc
             let extract_dir = bundled_dir.to_string_lossy().to_string();
-            let _extracted_path = crate::version_manager::extract_pandoc_archive(
+            let _extracted_path = crate::manager::extract_pandoc_archive(
                 bundled_path.clone(),
                 extract_dir
             ).await?;

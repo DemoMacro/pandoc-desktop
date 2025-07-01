@@ -1,10 +1,10 @@
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileHandling } from "./useFileHandling";
-import { usePandoc } from "./usePandoc";
+import { usePandocManager } from "./usePandocManager";
 import { useMessages } from "./useMessages";
 import { useNotification } from "./useNotification";
-import { generateOutputFilenameWithExt } from "../types/pandoc";
+import { generateOutputFilenameWithExt } from "./useUtils";
 
 const isConverting = ref<boolean>(false);
 const progress = ref<number>(0);
@@ -16,7 +16,7 @@ const getFileName = (path: string): string => {
 export function useConversion() {
   const { inputFile, outputDirectory, outputFileName, outputFormat } =
     useFileHandling();
-  const { isReady, customPandocPath } = usePandoc();
+  const { isReady, pandocInfo } = usePandocManager();
   const { displayMessage } = useMessages();
   const {
     initializeNotifications,
@@ -67,7 +67,7 @@ export function useConversion() {
         outputFile: outputPath,
         inputFormat: null,
         outputFormat: outputFormat.value,
-        customPandocPath: customPandocPath.value || null,
+        customPandocPath: pandocInfo.value?.path || null,
       });
 
       progress.value = 100;

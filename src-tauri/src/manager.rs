@@ -1,8 +1,10 @@
-use crate::types::{GithubAsset, GithubRelease, VersionInfo};
+use crate::types::{GithubAsset, GithubRelease, VersionInfo, PandocInfo};
 use crate::utils::{format_file_size, get_pandoc_asset_patterns};
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
 use tauri_plugin_http::reqwest;
+use tauri::{AppHandle, Manager};
 
 const UNGH_API_BASE: &str = "https://ungh.cc/repos";
 const PANDOC_REPO: &str = "jgm/pandoc";
@@ -13,6 +15,238 @@ const DOWNLOAD_MIRRORS: &[&str] = &[
     "https://gh.ddlc.top/",       // GitHub proxy
     "",                           // Original GitHub (empty prefix)
 ];
+
+/// Pandoc source types with priority order
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PandocSource {
+    /// Custom path set by user (highest priority)
+    Custom(PathBuf),
+    /// Bundled/Portable pandoc (includes resources and app data directories)
+    Bundled,
+    /// System-detected pandoc (lowest priority)
+    System(PathBuf),
+}
+
+/// Complete pandoc information including source and details
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PandocManager {
+    pub source: PandocSource,
+    pub info: Option<PandocInfo>,
+    pub available: bool,
+}
+
+impl PandocManager {
+    /// Create a new PandocManager
+    pub fn new(source: PandocSource) -> Self {
+        Self {
+            source,
+            info: None,
+            available: false,
+        }
+    }
+
+    /// Get the executable path for this pandoc source
+    pub fn get_executable_path(&self, app_handle: &AppHandle) -> Option<PathBuf> {
+        match &self.source {
+            PandocSource::Custom(path) => Some(path.clone()),
+            PandocSource::Bundled => get_bundled_pandoc_path(app_handle),
+            PandocSource::System(path) => Some(path.clone()),
+        }
+    }
+
+    /// Validate and update pandoc information
+    pub async fn validate(&mut self, app_handle: &AppHandle) -> Result<(), String> {
+        if let Some(path) = self.get_executable_path(app_handle) {
+            match validate_pandoc_executable(&path).await {
+                Ok(info) => {
+                    self.info = Some(info);
+                    self.available = true;
+                    Ok(())
+                }
+                Err(e) => {
+                    self.info = None;
+                    self.available = false;
+                    Err(e)
+                }
+            }
+        } else {
+            self.info = None;
+            self.available = false;
+            Err("Failed to get executable path".to_string())
+        }
+    }
+
+    /// Check if this pandoc source is available
+    #[allow(dead_code)]
+    pub fn is_available(&self) -> bool {
+        self.available
+    }
+
+    /// Get pandoc info if available
+    pub fn get_info(&self) -> Option<&PandocInfo> {
+        self.info.as_ref()
+    }
+}
+
+/// Get bundled/portable pandoc path from multiple locations
+fn get_bundled_pandoc_path(app_handle: &AppHandle) -> Option<PathBuf> {
+    let pandoc_exe = if cfg!(windows) {
+        "pandoc.exe"
+    } else {
+        "pandoc"
+    };
+
+    // Priority 1: Check resources directory (bundled with app)
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let bundled_paths = vec![
+            resource_dir.join("pandoc").join(&pandoc_exe),                    // Direct path
+            resource_dir.join("pandoc").join("bin").join(&pandoc_exe),        // In bin subdirectory
+        ];
+        
+        for path in bundled_paths {
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        
+        // Check for pandoc in any subdirectory of resources/pandoc
+        let pandoc_dir = resource_dir.join("pandoc");
+        if let Ok(entries) = std::fs::read_dir(&pandoc_dir) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                    let sub_paths = vec![
+                        entry.path().join(&pandoc_exe),
+                        entry.path().join("bin").join(&pandoc_exe),
+                    ];
+                    
+                    for path in sub_paths {
+                        if path.exists() {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Priority 2: Check app data directory (portable installation)
+    if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
+        let portable_dir = app_data_dir.join("pandoc-portable");
+        
+        let portable_paths = vec![
+            portable_dir.join(&pandoc_exe),                                   // Direct path
+            portable_dir.join("bin").join(&pandoc_exe),                       // In bin subdirectory
+        ];
+        
+        for path in portable_paths {
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        
+        // Check for pandoc in any subdirectory (version directories)
+        if let Ok(entries) = std::fs::read_dir(&portable_dir) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                    let sub_paths = vec![
+                        entry.path().join(&pandoc_exe),
+                        entry.path().join("bin").join(&pandoc_exe),
+                    ];
+                    
+                    for path in sub_paths {
+                        if path.exists() {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Validate pandoc executable and get its info
+async fn validate_pandoc_executable(path: &PathBuf) -> Result<PandocInfo, String> {
+    if !path.exists() {
+        return Err("Pandoc executable not found".to_string());
+    }
+
+    let output = crate::utils::create_hidden_command(&path.to_string_lossy())
+        .arg("--version")
+        .output()
+        .map_err(|e| format!("Failed to execute pandoc: {}", e))?;
+
+    if !output.status.success() {
+        return Err("Pandoc failed to execute".to_string());
+    }
+
+    let version_text = String::from_utf8(output.stdout)
+        .map_err(|_| "Failed to read pandoc version output".to_string())?;
+
+    let version = extract_version_from_output(&version_text);
+    let path_str = path.to_string_lossy().to_string();
+
+    // Get supported formats using the pandoc module function
+    let (input_formats, output_formats) = crate::pandoc::get_supported_formats(&path_str)
+        .unwrap_or_else(|_| {
+            // Fallback to basic formats if detection fails
+            (
+                vec!["markdown".to_string(), "html".to_string(), "docx".to_string()],
+                vec!["html".to_string(), "pdf".to_string(), "docx".to_string()],
+            )
+        });
+
+    Ok(PandocInfo {
+        version,
+        path: path_str,
+        is_working: true,
+        supported_input_formats: input_formats,
+        supported_output_formats: output_formats,
+        detected_paths: vec![],
+        search_paths: vec![],
+    })
+}
+
+/// Extract version number from pandoc version output
+fn extract_version_from_output(output: &str) -> String {
+    let first_line = output.lines().next().unwrap_or("Unknown");
+    
+    // Handle common format: "pandoc.exe 3.7.0.2" or "pandoc 3.7.0.2"
+    let parts: Vec<&str> = first_line.trim().split_whitespace().collect();
+    
+    // Look for version number in the parts (should be after program name)
+    for part in &parts {
+        // Skip program names
+        if part.contains("pandoc") {
+            continue;
+        }
+        
+        // Check if this part looks like a version number (starts with digit)
+        if part.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+            // Extract version pattern (digits and dots)
+            let mut version = String::new();
+            for ch in part.chars() {
+                if ch.is_ascii_digit() || ch == '.' {
+                    version.push(ch);
+                } else {
+                    break;
+                }
+            }
+            
+            if !version.is_empty() && version != "." {
+                return version;
+            }
+        }
+    }
+    
+    // Fallback: return first line with pandoc names removed
+    first_line
+        .replace("pandoc.exe", "")
+        .replace("pandoc", "")
+        .trim()
+        .to_string()
+}
 
 /// Extract clean version number from version string (simplified approach)
 /// Examples:
@@ -435,4 +669,152 @@ fn extract_tar_gz(archive_path: &PathBuf, extract_dir: &PathBuf) -> Result<Strin
         .map_err(|e| format!("Failed to extract TAR.GZ archive: {}", e))?;
 
     Ok(extract_dir.to_string_lossy().to_string())
+}
+
+/// Discover all available pandoc sources
+#[tauri::command]
+pub async fn discover_pandoc_sources(app_handle: AppHandle) -> Vec<PandocManager> {
+    let mut sources = Vec::new();
+
+    // 1. Check bundled pandoc (highest priority after custom)
+    let bundled_source = PandocManager::new(PandocSource::Bundled);
+    sources.push(bundled_source);
+
+    // 2. Discover system pandoc installations
+    let system_paths = crate::utils::get_search_paths();
+    for path_str in system_paths {
+        let path = PathBuf::from(&path_str);
+        if path.exists() && is_executable(&path) {
+            let system_source = PandocManager::new(PandocSource::System(path));
+            sources.push(system_source);
+        }
+    }
+
+    // Validate each source
+    for source in &mut sources {
+        let _ = source.validate(&app_handle).await;
+    }
+
+    sources
+}
+
+/// Check if a file is executable
+fn is_executable(path: &PathBuf) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            let permissions = metadata.permissions();
+            permissions.mode() & 0o111 != 0
+        } else {
+            false
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // On Windows, check if it's a .exe file or if it can be executed
+        path.extension().map_or(false, |ext| ext == "exe") || 
+        crate::utils::create_hidden_command(&path.to_string_lossy())
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+}
+
+/// Create a pandoc manager with custom path
+#[allow(dead_code)]
+pub fn create_custom_manager(custom_path: PathBuf) -> PandocManager {
+    PandocManager::new(PandocSource::Custom(custom_path))
+}
+
+/// Create and validate a pandoc manager with custom path (Tauri command)
+#[tauri::command]
+pub async fn create_and_validate_custom_manager(
+    custom_path: String, 
+    app_handle: AppHandle
+) -> Result<PandocManager, String> {
+    let path = PathBuf::from(custom_path);
+    let mut manager = PandocManager::new(PandocSource::Custom(path));
+    
+    manager.validate(&app_handle).await?;
+    Ok(manager)
+}
+
+/// Get the best available pandoc manager
+#[tauri::command]
+pub async fn get_best_pandoc_manager(app_handle: AppHandle) -> Option<PandocManager> {
+    let sources = discover_pandoc_sources(app_handle.clone()).await;
+    
+    for mut source in sources {
+        if let Ok(()) = source.validate(&app_handle).await {
+            return Some(source);
+        }
+    }
+    
+    None
+}
+
+/// Update bundled pandoc by downloading latest version
+#[tauri::command]
+pub async fn update_bundled_pandoc(app_handle: AppHandle) -> Result<String, String> {
+    // Get latest release
+    let latest_release = get_latest_pandoc_release().await?;
+    let version = latest_release.tag_name.clone();
+    
+    // Get resource directory
+    let resource_dir = app_handle.path().resource_dir()
+        .map_err(|e| format!("Failed to get resource directory: {}", e))?;
+    
+    let pandoc_dir = resource_dir.join("pandoc");
+    
+    // Create directory if it doesn't exist
+    std::fs::create_dir_all(&pandoc_dir)
+        .map_err(|e| format!("Failed to create pandoc directory: {}", e))?;
+    
+    // Download pandoc to resource directory
+    let download_path = download_pandoc(
+        version.clone(), 
+        pandoc_dir.to_string_lossy().to_string()
+    ).await?;
+    
+    // Extract the archive (this will overwrite existing files)
+    let extract_dir = pandoc_dir.to_string_lossy().to_string();
+    extract_pandoc_archive(download_path, extract_dir).await?;
+    
+    Ok(format!("Successfully updated bundled pandoc to version {}", version))
+}
+
+/// Check if bundled pandoc needs update
+#[tauri::command]
+pub async fn check_bundled_pandoc_update(app_handle: AppHandle) -> Result<bool, String> {
+    // Get current bundled pandoc version
+    let mut bundled_manager = PandocManager::new(PandocSource::Bundled);
+    let current_version = if bundled_manager.validate(&app_handle).await.is_ok() {
+        bundled_manager.get_info()
+            .map(|info| info.version.clone())
+            .unwrap_or_else(|| "unknown".to_string())
+    } else {
+        "none".to_string()
+    };
+    
+    // Get latest version
+    let latest_release = get_latest_pandoc_release().await?;
+    let latest_version = extract_clean_version(&latest_release.tag_name);
+    let current_clean = extract_clean_version(&current_version);
+    
+    // Simple version comparison
+    Ok(current_clean != latest_version)
+}
+
+/// Extract clean version number for comparison
+fn extract_clean_version(version: &str) -> String {
+    version
+        .trim_start_matches('v')
+        .trim()
+        .split_whitespace()
+        .next()
+        .unwrap_or(version)
+        .to_string()
 }

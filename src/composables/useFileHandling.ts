@@ -1,5 +1,5 @@
 import { ref, watch } from "vue";
-import { detectInputFormat, getBaseName } from "../types/pandoc";
+import { detectInputFormat, getBaseName } from "./useUtils";
 
 const inputFile = ref<string>("");
 const outputDirectory = ref<string>("");

@@ -1,5 +1,6 @@
 use std::env;
 use std::path::Path;
+use std::process::Command;
 
 /// Get OS-specific search paths for Pandoc
 pub fn get_search_paths() -> Vec<String> {
@@ -110,9 +111,9 @@ fn get_linux_common_paths() -> Vec<String> {
 /// Find pandoc in PATH
 fn get_path_pandoc_internal() -> Result<String, String> {
     let output = if cfg!(target_os = "windows") {
-        std::process::Command::new("where").arg("pandoc").output()
+        create_hidden_command("where").arg("pandoc").output()
     } else {
-        std::process::Command::new("which").arg("pandoc").output()
+        create_hidden_command("which").arg("pandoc").output()
     };
 
     match output {
@@ -131,7 +132,7 @@ pub fn validate_pandoc_executable(path: &str) -> bool {
         return false;
     }
 
-    std::process::Command::new(path)
+    create_hidden_command(path)
         .arg("--version")
         .output()
         .map(|output| output.status.success())
@@ -175,4 +176,18 @@ pub fn format_file_size(bytes: u64) -> String {
     }
 
     format!("{:.1} {}", size, UNITS[unit_index])
+}
+
+/// Create a hidden command to avoid PowerShell popup on Windows
+pub fn create_hidden_command(program: &str) -> Command {
+    let mut cmd = Command::new(program);
+    
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // Use CREATE_NO_WINDOW flag to hide the console window
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    
+    cmd
 }

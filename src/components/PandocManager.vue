@@ -33,7 +33,7 @@
           <summary>Path Information</summary>
           <p>
             <small
-              ><code>{{ pandocInfo.path }}</code></small
+              ><code>{{ cleanWindowsPath(pandocInfo.path) }}</code></small
             >
           </p>
         </details>
@@ -46,14 +46,16 @@
             <p>
               <small>
                 <span>{{ path === pandocInfo.path ? "🟢" : "⚪" }}</span>
-                <code>{{ path }}</code>
+                <code>{{ cleanWindowsPath(path) }}</code>
                 <button
                   v-if="path !== pandocInfo.path"
                   @click="switchPandocPath(path)"
+                  :disabled="switching"
+                  :aria-busy="switching"
                   class="outline secondary"
                   style="margin-left: 0.5rem; padding: 0.25rem 0.5rem"
                 >
-                  Use This
+                  {{ switching ? "Switching..." : "Use This" }}
                 </button>
               </small>
             </p>
@@ -63,11 +65,8 @@
 
       <section v-else>
         <h4>Pandoc Not Found</h4>
-        <p>Please install Pandoc or configure a custom path.</p>
-        <div class="grid">
-          <button @click="loadPandocInfo" class="secondary">
-            🔍 Detect Pandoc
-          </button>
+        <p>Please install Pandoc or configure a custom path below.</p>
+        <div class="grid" style="grid-template-columns: 1fr">
           <button @click="openGitHubReleases" class="secondary">
             🌐 Download Pandoc
           </button>
@@ -82,13 +81,21 @@
             type="text"
             placeholder="Enter custom Pandoc path..."
           />
-          <button @click="browseCustomPath" class="secondary">📁 Browse</button>
+          <button
+            @click="browseCustomPath"
+            class="secondary"
+            :disabled="browsing"
+            :aria-busy="browsing"
+          >
+            {{ browsing ? "📁 Browsing..." : "📁 Browse" }}
+          </button>
           <button
             @click="validateAndUseCustomPath"
-            :disabled="!customPandocPath"
+            :disabled="!customPandocPath || validating"
+            :aria-busy="validating"
             class="secondary"
           >
-            ✅ Validate
+            {{ validating ? "✅ Validating..." : "✅ Validate" }}
           </button>
         </div>
       </section>
@@ -114,8 +121,13 @@
             {{ downloading ? "Downloading..." : "🚀 Update Now" }}
           </button>
 
-          <button @click="loadPandocInfo" class="secondary">
-            🔍 Re-detect
+          <button
+            @click="loadPandocInfo"
+            class="secondary"
+            :disabled="reDetecting"
+            :aria-busy="reDetecting"
+          >
+            {{ reDetecting ? "🔍 Re-detecting..." : "🔍 Re-detect" }}
           </button>
         </div>
       </section>
@@ -164,8 +176,17 @@
                   : "📥 Install Portable Pandoc"
               }}
             </button>
-            <button @click="checkPortablePandoc" class="secondary">
-              🔍 Check Again
+            <button
+              @click="checkPortablePandoc"
+              class="secondary"
+              :disabled="portablePandocStatus.checking"
+              :aria-busy="portablePandocStatus.checking"
+            >
+              {{
+                portablePandocStatus.checking
+                  ? "🔍 Checking..."
+                  : "🔍 Check Again"
+              }}
             </button>
           </div>
         </div>
@@ -249,40 +270,126 @@
 import { ref, onMounted } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { useVersionManager } from "../composables/useVersionManager";
-import { usePandoc } from "../composables/usePandoc";
+import { usePandocManager } from "../composables/usePandocManager";
 import { useUI } from "../composables/useUI";
 import { useMessages } from "../composables/useMessages";
+import { cleanWindowsPath } from "../composables/useUtils";
 
 // Composables
 const {
-  latestVersion,
-  updateAvailable,
-  downloading,
-  checking,
-  downloadProgress,
-  checkForUpdates,
-  downloadLatestVersion,
-  formatBytes,
-} = useVersionManager();
-
-const {
-  pandocInfo,
   isReady,
-  customPandocPath,
-  loadPandocInfo,
-  validatePandocPath,
-} = usePandoc();
+  pandocInfo,
+  useCustomPath,
+  updateBundledPandoc,
+  checkBundledUpdate,
+  initializePandoc,
+} = usePandocManager();
 
 const { showPandocManager, closePandocManager } = useUI();
 const { displayMessage } = useMessages();
 
-// Portable Pandoc status
+// Local state for PandocManager component
+const customPandocPath = ref<string>("");
+const checking = ref<boolean>(false);
+const downloading = ref<boolean>(false);
+const updateAvailable = ref<boolean>(false);
+const latestVersion = ref<string>("");
+const reDetecting = ref<boolean>(false);
+const browsing = ref<boolean>(false);
+const validating = ref<boolean>(false);
+const switching = ref<boolean>(false);
+
+// Download progress for compatibility
+const downloadProgress = ref({
+  downloaded: 0,
+  total: 0,
+  progress: 0,
+  current_mirror: "",
+});
+
+// Portable Pandoc status (keeping legacy support for now)
 const portablePandocStatus = ref({
   available: false,
   checking: false,
   installing: false,
 });
+
+// Format bytes utility
+const formatBytes = (bytes: number): string => {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+};
+
+// Adapted functions for new manager system
+const loadPandocInfo = async () => {
+  reDetecting.value = true;
+  try {
+    await initializePandoc();
+    displayMessage("Pandoc detection completed", "success");
+  } catch (error) {
+    displayMessage(`Failed to re-detect pandoc: ${error}`, "error");
+  } finally {
+    reDetecting.value = false;
+  }
+};
+
+// Initial version check (without user feedback)
+const getLatestVersion = async () => {
+  try {
+    const release = await invoke<any>("get_latest_pandoc_release");
+    latestVersion.value = release.tag_name;
+  } catch (error) {
+    console.warn("Failed to fetch latest version:", error);
+    latestVersion.value = "Unknown";
+  }
+};
+
+const validatePandocPath = async (path: string): Promise<boolean> => {
+  return await useCustomPath(path);
+};
+
+const checkForUpdates = async (): Promise<boolean> => {
+  checking.value = true;
+  try {
+    // Always get latest version first
+    const release = await invoke<any>("get_latest_pandoc_release");
+    latestVersion.value = release.tag_name;
+
+    // Then check if update is needed
+    const needsUpdate = await checkBundledUpdate();
+    updateAvailable.value = needsUpdate;
+
+    if (needsUpdate) {
+      displayMessage(`Update available: ${latestVersion.value}`, "info");
+    } else {
+      displayMessage(
+        "✅ Already up to date! You have the latest version.",
+        "success",
+      );
+    }
+
+    return needsUpdate;
+  } catch (error) {
+    displayMessage(`Failed to check for updates: ${error}`, "error");
+    latestVersion.value = "Failed to fetch";
+    return false;
+  } finally {
+    checking.value = false;
+  }
+};
+
+const downloadLatestVersion = async (): Promise<void> => {
+  downloading.value = true;
+  try {
+    await updateBundledPandoc();
+    updateAvailable.value = false;
+  } finally {
+    downloading.value = false;
+  }
+};
 
 // Portable Pandoc functions
 const checkPortablePandoc = async () => {
@@ -315,16 +422,20 @@ const installPortablePandoc = async () => {
 
 // Path management functions
 const switchPandocPath = async (newPath: string) => {
+  switching.value = true;
   customPandocPath.value = newPath;
   try {
     await loadPandocInfo();
     displayMessage("Switched to new Pandoc path", "success");
   } catch (error) {
     displayMessage(`Failed to switch path: ${error}`, "error");
+  } finally {
+    switching.value = false;
   }
 };
 
 const browseCustomPath = async () => {
+  browsing.value = true;
   try {
     const result = await open({
       multiple: false,
@@ -339,9 +450,12 @@ const browseCustomPath = async () => {
 
     if (result) {
       customPandocPath.value = result as string;
+      displayMessage("File selected successfully", "success");
     }
   } catch (error) {
     displayMessage(`Failed to browse for path: ${error}`, "error");
+  } finally {
+    browsing.value = false;
   }
 };
 
@@ -351,6 +465,7 @@ const validateAndUseCustomPath = async () => {
     return;
   }
 
+  validating.value = true;
   try {
     const isValid = await validatePandocPath(customPandocPath.value);
 
@@ -365,6 +480,8 @@ const validateAndUseCustomPath = async () => {
     }
   } catch (error) {
     displayMessage(`Path validation failed: ${error}`, "error");
+  } finally {
+    validating.value = false;
   }
 };
 
@@ -375,7 +492,7 @@ const openGitHubReleases = () => {
 onMounted(async () => {
   await Promise.all([
     loadPandocInfo(),
-    checkForUpdates(),
+    getLatestVersion(),
     checkPortablePandoc(),
   ]);
 });

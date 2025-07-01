@@ -9,6 +9,48 @@ export interface PandocInfo {
   search_paths: string[];
 }
 
+// Pandoc source types for new manager system
+export interface PandocSource {
+  Custom?: string;
+  Bundled?: null;
+  System?: string;
+}
+
+// Pandoc manager structure for new unified system
+export interface PandocManager {
+  source: PandocSource;
+  info: PandocInfo | null;
+  available: boolean;
+}
+
+// Version management types
+export interface PandocRelease {
+  tag_name: string;
+  name: string;
+  body: string;
+  published_at: string;
+  assets: Array<{
+    name: string;
+    download_url: string;
+    size: number;
+    content_type: string;
+  }>;
+}
+
+export interface VersionInfo {
+  current: string | null;
+  latest: string | null;
+  available_versions: string[];
+  is_update_available: boolean;
+}
+
+export interface DownloadProgress {
+  downloaded: number;
+  total: number;
+  percentage: number;
+  speed: string;
+}
+
 // Pandoc configuration
 export interface PandocConfig {
   custom_path?: string;
@@ -46,308 +88,66 @@ export const INPUT_FORMAT_MAP: Record<string, string> = {
   txt: "plain",
   text: "plain",
 
-  // Other formats
-  epub: "epub",
-  org: "org",
-  textile: "textile",
-  wiki: "mediawiki",
-  dokuwiki: "dokuwiki",
-  man: "man",
-  typst: "typst",
-  typ: "typst",
+  // Bibliography formats
   bib: "biblatex",
+  biblatex: "biblatex",
   bibtex: "bibtex",
+
+  // Data formats
   json: "json",
   yaml: "yaml",
   yml: "yaml",
   csv: "csv",
   tsv: "tsv",
 
+  // Document formats
+  epub: "epub",
+  org: "org",
+  textile: "textile",
+  man: "man",
+  typst: "typst",
+  typ: "typst",
+
+  // Wiki formats
+  wiki: "mediawiki",
+  mediawiki: "mediawiki",
+  dokuwiki: "dokuwiki",
+  tikiwiki: "tikiwiki",
+  twiki: "twiki",
+  vimwiki: "vimwiki",
+
   // XML-based formats
   xml: "docbook",
   docbook: "docbook",
-};
 
-// Input format to compatible output formats mapping
-export const FORMAT_COMPATIBILITY: Record<string, string[]> = {
-  markdown: [
-    "html",
-    "html5",
-    "pdf",
-    "latex",
-    "docx",
-    "odt",
-    "epub",
-    "epub3",
-    "rst",
-    "plain",
-    "rtf",
-    "mediawiki",
-    "asciidoc",
-    "org",
-    "textile",
-    "beamer",
-    "pptx",
-    "icml",
-    "opendocument",
-    "json",
-    "native",
-    "xwiki",
-    "haddock",
-    "typst",
-  ],
-  html: [
-    "markdown",
-    "latex",
-    "docx",
-    "odt",
-    "epub",
-    "rst",
-    "plain",
-    "rtf",
-    "mediawiki",
-    "asciidoc",
-    "org",
-    "textile",
-    "json",
-    "native",
-    "xwiki",
-    "typst",
-  ],
-  latex: [
-    "html",
-    "html5",
-    "pdf",
-    "docx",
-    "odt",
-    "epub",
-    "markdown",
-    "rst",
-    "plain",
-    "rtf",
-    "mediawiki",
-    "asciidoc",
-    "org",
-    "json",
-    "native",
-    "xwiki",
-    "typst",
-  ],
-  docx: [
-    "html",
-    "html5",
-    "markdown",
-    "latex",
-    "pdf",
-    "odt",
-    "epub",
-    "rst",
-    "plain",
-    "rtf",
-    "mediawiki",
-    "asciidoc",
-    "org",
-    "json",
-    "native",
-  ],
-  odt: [
-    "html",
-    "html5",
-    "markdown",
-    "latex",
-    "pdf",
-    "docx",
-    "epub",
-    "rst",
-    "plain",
-    "rtf",
-    "mediawiki",
-    "asciidoc",
-    "org",
-    "json",
-    "native",
-  ],
-  epub: [
-    "html",
-    "html5",
-    "markdown",
-    "latex",
-    "docx",
-    "odt",
-    "rst",
-    "plain",
-    "rtf",
-    "json",
-    "native",
-  ],
-  rst: [
-    "html",
-    "html5",
-    "pdf",
-    "latex",
-    "docx",
-    "odt",
-    "epub",
-    "markdown",
-    "plain",
-    "rtf",
-    "mediawiki",
-    "asciidoc",
-    "org",
-    "json",
-    "native",
-  ],
-  org: [
-    "html",
-    "html5",
-    "pdf",
-    "latex",
-    "docx",
-    "odt",
-    "epub",
-    "markdown",
-    "rst",
-    "plain",
-    "rtf",
-    "mediawiki",
-    "asciidoc",
-    "json",
-    "native",
-  ],
-  textile: [
-    "html",
-    "html5",
-    "pdf",
-    "latex",
-    "docx",
-    "odt",
-    "epub",
-    "markdown",
-    "rst",
-    "plain",
-    "rtf",
-    "mediawiki",
-    "asciidoc",
-    "org",
-    "json",
-    "native",
-  ],
-  mediawiki: [
-    "html",
-    "html5",
-    "pdf",
-    "latex",
-    "docx",
-    "odt",
-    "epub",
-    "markdown",
-    "rst",
-    "plain",
-    "rtf",
-    "asciidoc",
-    "org",
-    "json",
-    "native",
-  ],
-  biblatex: ["html", "markdown", "json", "native", "bibtex", "csljson"],
-  bibtex: ["html", "markdown", "json", "native", "biblatex", "csljson"],
-  json: ["html", "markdown", "latex", "native"],
-  plain: [
-    "html",
-    "markdown",
-    "latex",
-    "docx",
-    "odt",
-    "epub",
-    "rst",
-    "rtf",
-    "json",
-    "native",
-  ],
-  rtf: [
-    "html",
-    "markdown",
-    "latex",
-    "docx",
-    "odt",
-    "rst",
-    "plain",
-    "json",
-    "native",
-  ],
-  man: ["html", "markdown", "latex", "plain", "rst", "json", "native"],
-  dokuwiki: [
-    "html",
-    "markdown",
-    "latex",
-    "docx",
-    "odt",
-    "rst",
-    "plain",
-    "json",
-    "native",
-  ],
-  typst: [
-    "html",
-    "markdown",
-    "latex",
-    "pdf",
-    "docx",
-    "odt",
-    "rst",
-    "plain",
-    "json",
-    "native",
-    "xwiki",
-    "haddock",
-    "asciidoc",
-    "mediawiki",
-    "org",
-  ],
-  native: [
-    "html",
-    "html5",
-    "pdf",
-    "latex",
-    "docx",
-    "odt",
-    "epub",
-    "markdown",
-    "rst",
-    "plain",
-    "rtf",
-    "mediawiki",
-    "asciidoc",
-    "org",
-    "textile",
-    "beamer",
-    "pptx",
-    "icml",
-    "opendocument",
-    "json",
-    "xwiki",
-    "haddock",
-    "typst",
-  ],
-  // DocBook XML format (from Context7 docs)
-  docbook: [
-    "html",
-    "html5",
-    "pdf",
-    "latex",
-    "docx",
-    "odt",
-    "epub",
-    "markdown",
-    "rst",
-    "plain",
-    "rtf",
-    "mediawiki",
-    "asciidoc",
-    "org",
-    "native",
-    "json",
-  ],
+  // Other formats
+  fb2: "fb2",
+  opml: "opml",
+  t2t: "t2t",
+  ipynb: "ipynb",
+  muse: "muse",
+  ris: "ris",
+  jats: "jats",
+  jira: "jira",
+  creole: "creole",
+  mdoc: "mdoc",
+  pod: "pod",
+  endnotexml: "endnotexml",
+  bits: "bits",
+  djot: "djot",
+  csljson: "csljson",
+
+  // GitHub flavored markdown
+  gfm: "gfm",
+
+  // CommonMark
+  commonmark: "commonmark",
+
+  // Haddock
+  haddock: "haddock",
+
+  // Native pandoc format
+  native: "native",
 };
 
 // Output format definitions with human-readable labels and file extensions
@@ -359,24 +159,28 @@ export interface OutputFormat {
 }
 
 export const OUTPUT_FORMATS: OutputFormat[] = [
+  // HTML formats
   {
     value: "html",
     label: "HTML",
     ext: "html",
     description: "HyperText Markup Language",
   },
+  { value: "html4", label: "HTML4", ext: "html", description: "HTML4 format" },
   { value: "html5", label: "HTML5", ext: "html", description: "HTML5 format" },
+  {
+    value: "chunkedhtml",
+    label: "Chunked HTML",
+    ext: "html",
+    description: "Chunked HTML",
+  },
+
+  // Document formats
   {
     value: "pdf",
     label: "PDF",
     ext: "pdf",
     description: "Portable Document Format",
-  },
-  {
-    value: "latex",
-    label: "LaTeX",
-    ext: "tex",
-    description: "LaTeX typesetting",
   },
   {
     value: "docx",
@@ -391,64 +195,18 @@ export const OUTPUT_FORMATS: OutputFormat[] = [
     description: "LibreOffice Writer",
   },
   {
-    value: "epub",
-    label: "EPUB",
-    ext: "epub",
-    description: "Electronic Publication",
+    value: "opendocument",
+    label: "OpenDocument",
+    ext: "odt",
+    description: "OpenDocument format",
   },
+
+  // LaTeX formats
   {
-    value: "epub3",
-    label: "EPUB3",
-    ext: "epub",
-    description: "EPUB version 3",
-  },
-  {
-    value: "markdown",
-    label: "Markdown",
-    ext: "md",
-    description: "Markdown format",
-  },
-  {
-    value: "rst",
-    label: "reStructuredText",
-    ext: "rst",
-    description: "reStructuredText",
-  },
-  {
-    value: "plain",
-    label: "Plain Text",
-    ext: "txt",
-    description: "Plain text format",
-  },
-  {
-    value: "rtf",
-    label: "Rich Text Format",
-    ext: "rtf",
-    description: "Rich Text Format",
-  },
-  {
-    value: "mediawiki",
-    label: "MediaWiki",
-    ext: "wiki",
-    description: "MediaWiki markup",
-  },
-  {
-    value: "asciidoc",
-    label: "AsciiDoc",
-    ext: "adoc",
-    description: "AsciiDoc format",
-  },
-  {
-    value: "org",
-    label: "Org Mode",
-    ext: "org",
-    description: "Emacs Org mode",
-  },
-  {
-    value: "textile",
-    label: "Textile",
-    ext: "textile",
-    description: "Textile markup",
+    value: "latex",
+    label: "LaTeX",
+    ext: "tex",
+    description: "LaTeX typesetting",
   },
   {
     value: "beamer",
@@ -457,36 +215,120 @@ export const OUTPUT_FORMATS: OutputFormat[] = [
     description: "LaTeX Beamer presentation",
   },
   {
-    value: "pptx",
-    label: "PowerPoint",
-    ext: "pptx",
-    description: "Microsoft PowerPoint",
+    value: "context",
+    label: "ConTeXt",
+    ext: "tex",
+    description: "ConTeXt format",
+  },
+
+  // EPUB formats
+  {
+    value: "epub",
+    label: "EPUB",
+    ext: "epub",
+    description: "Electronic Publication",
   },
   {
-    value: "icml",
-    label: "InDesign ICML",
-    ext: "icml",
-    description: "Adobe InDesign",
+    value: "epub2",
+    label: "EPUB2",
+    ext: "epub",
+    description: "EPUB version 2",
   },
   {
-    value: "opendocument",
-    label: "OpenDocument",
-    ext: "odt",
-    description: "OpenDocument format",
+    value: "epub3",
+    label: "EPUB3",
+    ext: "epub",
+    description: "EPUB version 3",
   },
-  { value: "json", label: "JSON", ext: "json", description: "JSON format" },
+
+  // Markdown variants
   {
-    value: "native",
-    label: "Pandoc Native",
-    ext: "native",
-    description: "Pandoc AST",
+    value: "markdown",
+    label: "Markdown",
+    ext: "md",
+    description: "Markdown format",
   },
-  { value: "ms", label: "Groff MS", ext: "ms", description: "Groff MS format" },
   {
-    value: "man",
-    label: "Man Page",
-    ext: "man",
-    description: "Unix manual page",
+    value: "commonmark",
+    label: "CommonMark",
+    ext: "md",
+    description: "CommonMark standard",
+  },
+  {
+    value: "commonmark_x",
+    label: "CommonMark-X",
+    ext: "md",
+    description: "CommonMark extensions",
+  },
+  {
+    value: "gfm",
+    label: "GitHub Markdown",
+    ext: "md",
+    description: "GitHub Flavored Markdown",
+  },
+  {
+    value: "markdown_github",
+    label: "Markdown (GitHub)",
+    ext: "md",
+    description: "GitHub style Markdown",
+  },
+  {
+    value: "markdown_mmd",
+    label: "MultiMarkdown",
+    ext: "md",
+    description: "MultiMarkdown",
+  },
+  {
+    value: "markdown_phpextra",
+    label: "Markdown (PHP Extra)",
+    ext: "md",
+    description: "PHP Markdown Extra",
+  },
+  {
+    value: "markdown_strict",
+    label: "Markdown (Strict)",
+    ext: "md",
+    description: "Strict Markdown",
+  },
+  {
+    value: "markua",
+    label: "Markua",
+    ext: "markua",
+    description: "Markua format",
+  },
+
+  // Text formats
+  {
+    value: "plain",
+    label: "Plain Text",
+    ext: "txt",
+    description: "Plain text format",
+  },
+  {
+    value: "rst",
+    label: "reStructuredText",
+    ext: "rst",
+    description: "reStructuredText",
+  },
+  {
+    value: "rtf",
+    label: "Rich Text Format",
+    ext: "rtf",
+    description: "Rich Text Format",
+  },
+  {
+    value: "ansi",
+    label: "ANSI",
+    ext: "txt",
+    description: "ANSI colored text",
+  },
+
+  // Wiki formats
+  {
+    value: "mediawiki",
+    label: "MediaWiki",
+    ext: "wiki",
+    description: "MediaWiki markup",
   },
   {
     value: "dokuwiki",
@@ -501,6 +343,46 @@ export const OUTPUT_FORMATS: OutputFormat[] = [
     description: "XWiki markup",
   },
   {
+    value: "zimwiki",
+    label: "ZimWiki",
+    ext: "zimwiki",
+    description: "Zim Wiki markup",
+  },
+
+  // AsciiDoc formats
+  {
+    value: "asciidoc",
+    label: "AsciiDoc",
+    ext: "adoc",
+    description: "AsciiDoc format",
+  },
+  {
+    value: "asciidoc_legacy",
+    label: "AsciiDoc (Legacy)",
+    ext: "adoc",
+    description: "Legacy AsciiDoc",
+  },
+  {
+    value: "asciidoctor",
+    label: "Asciidoctor",
+    ext: "adoc",
+    description: "Asciidoctor format",
+  },
+
+  // Other markup
+  {
+    value: "org",
+    label: "Org Mode",
+    ext: "org",
+    description: "Emacs Org mode",
+  },
+  {
+    value: "textile",
+    label: "Textile",
+    ext: "textile",
+    description: "Textile markup",
+  },
+  {
     value: "haddock",
     label: "Haddock",
     ext: "haddock",
@@ -511,6 +393,173 @@ export const OUTPUT_FORMATS: OutputFormat[] = [
     label: "Typst",
     ext: "typ",
     description: "Typst typesetting",
+  },
+  { value: "muse", label: "Muse", ext: "muse", description: "Emacs Muse" },
+
+  // Presentation formats
+  {
+    value: "pptx",
+    label: "PowerPoint",
+    ext: "pptx",
+    description: "Microsoft PowerPoint",
+  },
+  {
+    value: "revealjs",
+    label: "reveal.js",
+    ext: "html",
+    description: "reveal.js presentation",
+  },
+  {
+    value: "dzslides",
+    label: "DZSlides",
+    ext: "html",
+    description: "DZSlides presentation",
+  },
+  { value: "s5", label: "S5", ext: "html", description: "S5 slideshow" },
+  {
+    value: "slideous",
+    label: "Slideous",
+    ext: "html",
+    description: "Slideous slideshow",
+  },
+  {
+    value: "slidy",
+    label: "Slidy",
+    ext: "html",
+    description: "Slidy slideshow",
+  },
+
+  // Publishing formats
+  {
+    value: "icml",
+    label: "InDesign ICML",
+    ext: "icml",
+    description: "Adobe InDesign",
+  },
+  {
+    value: "tei",
+    label: "TEI",
+    ext: "xml",
+    description: "Text Encoding Initiative",
+  },
+
+  // Data formats
+  { value: "json", label: "JSON", ext: "json", description: "JSON format" },
+  {
+    value: "csljson",
+    label: "CSL JSON",
+    ext: "json",
+    description: "Citation Style Language JSON",
+  },
+  {
+    value: "native",
+    label: "Pandoc Native",
+    ext: "native",
+    description: "Pandoc AST",
+  },
+
+  // Bibliography formats
+  {
+    value: "biblatex",
+    label: "BibLaTeX",
+    ext: "bib",
+    description: "BibLaTeX bibliography",
+  },
+  {
+    value: "bibtex",
+    label: "BibTeX",
+    ext: "bib",
+    description: "BibTeX bibliography",
+  },
+
+  // System formats
+  { value: "ms", label: "Groff MS", ext: "ms", description: "Groff MS format" },
+  {
+    value: "man",
+    label: "Man Page",
+    ext: "man",
+    description: "Unix manual page",
+  },
+  {
+    value: "texinfo",
+    label: "Texinfo",
+    ext: "texi",
+    description: "GNU Texinfo",
+  },
+
+  // Special formats
+  {
+    value: "fb2",
+    label: "FictionBook2",
+    ext: "fb2",
+    description: "FictionBook2 e-book",
+  },
+  {
+    value: "ipynb",
+    label: "Jupyter Notebook",
+    ext: "ipynb",
+    description: "Jupyter Notebook",
+  },
+  {
+    value: "opml",
+    label: "OPML",
+    ext: "opml",
+    description: "Outline Processor Markup Language",
+  },
+  { value: "djot", label: "Djot", ext: "djot", description: "Djot markup" },
+
+  // XML/DocBook formats
+  {
+    value: "docbook",
+    label: "DocBook",
+    ext: "xml",
+    description: "DocBook XML",
+  },
+  {
+    value: "docbook4",
+    label: "DocBook 4",
+    ext: "xml",
+    description: "DocBook 4.x",
+  },
+  {
+    value: "docbook5",
+    label: "DocBook 5",
+    ext: "xml",
+    description: "DocBook 5.x",
+  },
+
+  // JATS formats
+  {
+    value: "jats",
+    label: "JATS",
+    ext: "xml",
+    description: "Journal Article Tag Suite",
+  },
+  {
+    value: "jats_archiving",
+    label: "JATS Archiving",
+    ext: "xml",
+    description: "JATS Archiving DTD",
+  },
+  {
+    value: "jats_articleauthoring",
+    label: "JATS Article Authoring",
+    ext: "xml",
+    description: "JATS Article Authoring DTD",
+  },
+  {
+    value: "jats_publishing",
+    label: "JATS Publishing",
+    ext: "xml",
+    description: "JATS Publishing DTD",
+  },
+
+  // Other formats
+  {
+    value: "jira",
+    label: "Jira Wiki",
+    ext: "jira",
+    description: "Jira wiki markup",
   },
 ];
 
@@ -574,79 +623,4 @@ export const ERROR_MESSAGES: Record<PandocError, ErrorInfo> = {
   },
 };
 
-// Utility functions
-export function getFileExtension(filepath: string): string {
-  const lastDot = filepath.lastIndexOf(".");
-  if (lastDot === -1 || lastDot === filepath.length - 1) {
-    return "";
-  }
-  return filepath.substring(lastDot + 1).toLowerCase();
-}
-
-// Get filename without extension from path
-export function getBaseName(filepath: string): string {
-  // First get the filename from path
-  const filename = filepath.split(/[/\\]/).pop() || "";
-  // Then remove extension
-  const lastDot = filename.lastIndexOf(".");
-  if (lastDot === -1 || lastDot === filename.length - 1) {
-    return filename;
-  }
-  return filename.substring(0, lastDot);
-}
-
-export function detectInputFormat(filepath: string): string {
-  const ext = getFileExtension(filepath);
-  return INPUT_FORMAT_MAP[ext] || "markdown";
-}
-
-export function getOutputFormatByValue(
-  value: string,
-): OutputFormat | undefined {
-  return OUTPUT_FORMATS.find((format) => format.value === value);
-}
-
-export function generateOutputFilename(
-  inputPath: string,
-  outputFormat: string,
-): string {
-  const baseName = inputPath.replace(/\.[^/.]+$/, "");
-  const outputFormatObj = getOutputFormatByValue(outputFormat);
-  const ext = outputFormatObj?.ext || outputFormat;
-  return `${baseName}.${ext}`;
-}
-
-// Generate output filename with extension for display
-export function generateOutputFilenameWithExt(
-  baseName: string,
-  outputFormat: string,
-): string {
-  const outputFormatObj = getOutputFormatByValue(outputFormat);
-  const ext = outputFormatObj?.ext || outputFormat;
-  return `${baseName}.${ext}`;
-}
-
-export function getCompatibleOutputFormats(
-  inputFormat: string,
-  supportedOutputs: string[],
-): OutputFormat[] {
-  // Get compatible formats for this input format
-  const compatibleFormats = FORMAT_COMPATIBILITY[inputFormat] || [];
-
-  return OUTPUT_FORMATS.filter((format) => {
-    // Check if format is supported by current Pandoc installation
-    if (!supportedOutputs.includes(format.value)) {
-      return false;
-    }
-
-    // Check if this input format can convert to this output format
-    if (
-      compatibleFormats.length > 0 &&
-      !compatibleFormats.includes(format.value)
-    ) {
-      return false;
-    }
-
-    return true;
-  });
-}
+// Note: Utility functions have been moved to src/composables/useUtils.ts

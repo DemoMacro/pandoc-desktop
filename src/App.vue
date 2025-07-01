@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { usePandoc } from "./composables/usePandoc";
+import { usePandocManager } from "./composables/usePandocManager";
 import { useUI } from "./composables/useUI";
 
 import FileInput from "./components/FileInput.vue";
@@ -83,7 +83,7 @@ import SettingsPanel from "./components/SettingsPanel.vue";
 import PandocManager from "./components/PandocManager.vue";
 
 // Use composables for state management
-const { pandocInfo, isReady, initializePandoc } = usePandoc();
+const { pandocInfo, isReady, initializePandoc } = usePandocManager();
 const { toggleSettings, togglePandocManager } = useUI();
 const isDarkMode = ref(false);
 

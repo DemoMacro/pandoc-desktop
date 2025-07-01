@@ -123,6 +123,11 @@ const getFileName = (path: string): string => {
 button.secondary {
   width: 100%;
   margin-bottom: 1rem;
+  transition: all 0.2s ease;
+}
+
+button.secondary:hover:not(:disabled) {
+  transform: translateY(-1px);
 }
 
 .file-preview {
