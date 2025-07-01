@@ -62,6 +62,10 @@ export const INPUT_FORMAT_MAP: Record<string, string> = {
   yml: "yaml",
   csv: "csv",
   tsv: "tsv",
+
+  // XML-based formats
+  xml: "docbook",
+  docbook: "docbook",
 };
 
 // Input format to compatible output formats mapping
@@ -88,6 +92,9 @@ export const FORMAT_COMPATIBILITY: Record<string, string[]> = {
     "opendocument",
     "json",
     "native",
+    "xwiki",
+    "haddock",
+    "typst",
   ],
   html: [
     "markdown",
@@ -104,6 +111,8 @@ export const FORMAT_COMPATIBILITY: Record<string, string[]> = {
     "textile",
     "json",
     "native",
+    "xwiki",
+    "typst",
   ],
   latex: [
     "html",
@@ -121,6 +130,8 @@ export const FORMAT_COMPATIBILITY: Record<string, string[]> = {
     "org",
     "json",
     "native",
+    "xwiki",
+    "typst",
   ],
   docx: [
     "html",
@@ -287,6 +298,11 @@ export const FORMAT_COMPATIBILITY: Record<string, string[]> = {
     "plain",
     "json",
     "native",
+    "xwiki",
+    "haddock",
+    "asciidoc",
+    "mediawiki",
+    "org",
   ],
   native: [
     "html",
@@ -308,6 +324,28 @@ export const FORMAT_COMPATIBILITY: Record<string, string[]> = {
     "pptx",
     "icml",
     "opendocument",
+    "json",
+    "xwiki",
+    "haddock",
+    "typst",
+  ],
+  // DocBook XML format (from Context7 docs)
+  docbook: [
+    "html",
+    "html5",
+    "pdf",
+    "latex",
+    "docx",
+    "odt",
+    "epub",
+    "markdown",
+    "rst",
+    "plain",
+    "rtf",
+    "mediawiki",
+    "asciidoc",
+    "org",
+    "native",
     "json",
   ],
 };
@@ -455,6 +493,24 @@ export const OUTPUT_FORMATS: OutputFormat[] = [
     label: "DokuWiki",
     ext: "dokuwiki",
     description: "DokuWiki markup",
+  },
+  {
+    value: "xwiki",
+    label: "XWiki",
+    ext: "xwiki",
+    description: "XWiki markup",
+  },
+  {
+    value: "haddock",
+    label: "Haddock",
+    ext: "haddock",
+    description: "Haskell documentation",
+  },
+  {
+    value: "typst",
+    label: "Typst",
+    ext: "typ",
+    description: "Typst typesetting",
   },
 ];
 

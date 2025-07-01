@@ -7,10 +7,25 @@ settings:
 importers:
   .:
     dependencies:
+      "@picocss/pico":
+        specifier: 2.1.1
+        version: 2.1.1
       "@tauri-apps/api":
         specifier: 2.6.0
         version: 2.6.0
       "@tauri-apps/plugin-dialog":
+        specifier: ~2.3.0
+        version: 2.3.0
+      "@tauri-apps/plugin-fs":
+        specifier: ~2.4.0
+        version: 2.4.0
+      "@tauri-apps/plugin-http":
+        specifier: ~2.5.0
+        version: 2.5.0
+      "@tauri-apps/plugin-notification":
+        specifier: ~2.3.0
+        version: 2.3.0
+      "@tauri-apps/plugin-shell":
         specifier: ~2.3.0
         version: 2.3.0
       vue:
@@ -568,6 +583,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  "@picocss/pico@2.1.1":
+    resolution:
+      {
+        integrity: sha512-kIDugA7Ps4U+2BHxiNHmvgPIQDWPDU4IeU6TNRdvXQM1uZX+FibqDQT2xUOnnO2yq/LUHcwnGlu1hvf4KfXnMg==,
+      }
+
   "@prettier/plugin-oxc@0.0.4":
     resolution:
       {
@@ -858,6 +879,30 @@ packages:
     resolution:
       {
         integrity: sha512-ylSBvYYShpGlKKh732ZuaHyJ5Ie1JR71QCXewCtsRLqGdc8Is4xWdz6t43rzXyvkItM9syNPMvFVcvjgEy+/GA==,
+      }
+
+  "@tauri-apps/plugin-fs@2.4.0":
+    resolution:
+      {
+        integrity: sha512-Sp8AdDcbyXyk6LD6Pmdx44SH3LPeNAvxR2TFfq/8CwqzfO1yOyV+RzT8fov0NNN7d9nvW7O7MtMAptJ42YXA5g==,
+      }
+
+  "@tauri-apps/plugin-http@2.5.0":
+    resolution:
+      {
+        integrity: sha512-l4M2DUIsOBIMrbj4dJZwrB4mJiB7OA/2Tj3gEbX2fjq5MOpETklJPKfDvzUTDwuq4lIKCKKykz8E8tpOgvi0EQ==,
+      }
+
+  "@tauri-apps/plugin-notification@2.3.0":
+    resolution:
+      {
+        integrity: sha512-QDwXo9VzAlH97c0veuf19TZI6cRBPfJDl2O6hNEDvI66j60lOO9z+PL6MJrj8A6Y+t55r7mGhe3rQWLmOre2HA==,
+      }
+
+  "@tauri-apps/plugin-shell@2.3.0":
+    resolution:
+      {
+        integrity: sha512-6GIRxO2z64uxPX4CCTuhQzefvCC0ew7HjdBhMALiGw74vFBDY95VWueAHOHgNOMV4UOUAFupyidN9YulTe5xlA==,
       }
 
   "@tybys/wasm-util@0.9.0":
@@ -1727,6 +1772,8 @@ snapshots:
   "@oxlint/win32-x64@1.4.0":
     optional: true
 
+  "@picocss/pico@2.1.1": {}
+
   "@prettier/plugin-oxc@0.0.4":
     dependencies:
       oxc-parser: 0.74.0
@@ -1843,6 +1890,22 @@ snapshots:
       "@tauri-apps/cli-win32-x64-msvc": 2.6.2
 
   "@tauri-apps/plugin-dialog@2.3.0":
+    dependencies:
+      "@tauri-apps/api": 2.6.0
+
+  "@tauri-apps/plugin-fs@2.4.0":
+    dependencies:
+      "@tauri-apps/api": 2.6.0
+
+  "@tauri-apps/plugin-http@2.5.0":
+    dependencies:
+      "@tauri-apps/api": 2.6.0
+
+  "@tauri-apps/plugin-notification@2.3.0":
+    dependencies:
+      "@tauri-apps/api": 2.6.0
+
+  "@tauri-apps/plugin-shell@2.3.0":
     dependencies:
       "@tauri-apps/api": 2.6.0
 
