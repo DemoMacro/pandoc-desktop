@@ -3,7 +3,8 @@
     <header class="app-header">
       <nav>
         <div class="nav-brand">
-          <strong>📄 Pandoc Desktop</strong>
+          <img src="/pandoc-icon.svg" alt="Pandoc Desktop" class="brand-icon" />
+          <strong>Pandoc Desktop</strong>
         </div>
         <div class="nav-actions">
           <button
@@ -173,9 +174,18 @@ nav {
 }
 
 .nav-brand {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--pico-spacing) * 0.5);
   font-size: 1rem;
   font-weight: 600;
   color: var(--pico-color);
+}
+
+.brand-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
 }
 
 .nav-actions {
