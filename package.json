@@ -1,7 +1,8 @@
 {
   "name": "pandoc-desktop",
-  "private": true,
   "version": "0.0.0",
+  "description": "A modern, cross-platform desktop application for universal document conversion powered by Pandoc",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +11,41 @@
     "lint": "basis lint --all",
     "postinstall": "basis git setup"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/pandoc-desktop.git"
+  },
+  "keywords": [
+    "pandoc",
+    "document-converter",
+    "markdown",
+    "pdf",
+    "latex",
+    "html",
+    "docx",
+    "epub",
+    "tauri",
+    "vue",
+    "typescript",
+    "desktop-app",
+    "cross-platform",
+    "file-conversion",
+    "typst",
+    "academic-writing",
+    "publishing",
+    "gui",
+    "electron-alternative"
+  ],
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://imst.xyz/"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/pandoc-desktop/issues"
+  },
+  "homepage": "https://github.com/DemoMacro/pandoc-desktop#readme",
   "dependencies": {
     "@picocss/pico": "2.1.1",
     "@tauri-apps/api": "2.6.0",
