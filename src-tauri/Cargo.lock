@@ -79,6 +79,7 @@ version = "0.1.0"
 dependencies = [
  "flate2",
  "futures-util",
+ "lzma-rs",
  "serde",
  "serde_json",
  "tar",

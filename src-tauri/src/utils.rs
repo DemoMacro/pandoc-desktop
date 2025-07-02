@@ -143,13 +143,13 @@ pub fn validate_pandoc_executable(path: &str) -> bool {
 pub fn get_pandoc_asset_patterns() -> Vec<&'static str> {
     if cfg!(target_os = "windows") {
         vec![
-            "windows-x86_64.zip",   // Prefer portable version
-            "windows-x86_64.msi",   // Fallback to installer (not supported yet)
+            "windows-x86_64.zip", // Prefer portable version
+            "windows-x86_64.msi", // Fallback to installer (not supported yet)
         ]
     } else if cfg!(target_os = "macos") {
         vec![
-            "macOS.zip",           // Prefer portable version
-            "macOS.pkg",           // Fallback to installer (not supported yet)
+            "macOS.zip", // Prefer portable version
+            "macOS.pkg", // Fallback to installer (not supported yet)
         ]
     } else {
         vec![
@@ -181,13 +181,13 @@ pub fn format_file_size(bytes: u64) -> String {
 /// Create a hidden command to avoid PowerShell popup on Windows
 pub fn create_hidden_command(program: &str) -> Command {
     let mut cmd = Command::new(program);
-    
+
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         // Use CREATE_NO_WINDOW flag to hide the console window
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
-    
+
     cmd
 }

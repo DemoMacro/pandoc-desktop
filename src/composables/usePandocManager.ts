@@ -10,7 +10,7 @@ const isLoading = ref(false);
 // Get source type display name (moved to outer scope)
 const getSourceDisplayName = (source: PandocSource): string => {
   if ("Custom" in source) return `Custom: ${source.Custom}`;
-  if ("Bundled" in source) return "Bundled/Portable";
+  if ("Managed" in source) return "Managed (Bundled/Portable)";
   if ("System" in source) return `System: ${source.System}`;
   return "Unknown";
 };
@@ -77,21 +77,26 @@ export function usePandocManager() {
     }
   };
 
-  // Update bundled pandoc
-  const updateBundledPandoc = async (): Promise<boolean> => {
+  // Update managed pandoc
+  const updateManagedPandoc = async (): Promise<boolean> => {
     try {
       isLoading.value = true;
-      const result = await invoke<string>("update_bundled_pandoc");
+      const result = await invoke<string>("update_managed_pandoc");
       displayMessage(result, "success");
       // Refresh current manager after update
       await getBestManager();
       return true;
     } catch (error) {
-      displayMessage(`Failed to update bundled pandoc: ${error}`, "error");
+      displayMessage(`Failed to update managed pandoc: ${error}`, "error");
       return false;
     } finally {
       isLoading.value = false;
     }
+  };
+
+  // Update bundled pandoc (legacy alias)
+  const updateBundledPandoc = async (): Promise<boolean> => {
+    return updateManagedPandoc();
   };
 
   // Check if bundled pandoc needs update
@@ -102,6 +107,53 @@ export function usePandocManager() {
     } catch (error) {
       displayMessage(`Failed to check for updates: ${error}`, "error");
       return false;
+    }
+  };
+
+  // Download Typst to specified directory
+  const downloadTypst = async (
+    version?: string,
+    downloadDir?: string,
+  ): Promise<boolean> => {
+    try {
+      isLoading.value = true;
+      const result = await invoke<string>("download_typst", {
+        version: version || null,
+        downloadDir: downloadDir || "downloads",
+      });
+      displayMessage(`Typst downloaded successfully: ${result}`, "success");
+      return true;
+    } catch (error) {
+      displayMessage(`Failed to download Typst: ${error}`, "error");
+      return false;
+    } finally {
+      isLoading.value = false;
+    }
+  };
+
+  // Update managed typst
+  const updateManagedTypst = async (): Promise<boolean> => {
+    try {
+      isLoading.value = true;
+      const result = await invoke<string>("update_managed_typst");
+      displayMessage(result, "success");
+      return true;
+    } catch (error) {
+      displayMessage(`Failed to update managed Typst: ${error}`, "error");
+      return false;
+    } finally {
+      isLoading.value = false;
+    }
+  };
+
+  // Get latest Typst release information
+  const getLatestTypstRelease = async () => {
+    try {
+      const release = await invoke("get_latest_typst_release_info");
+      return release;
+    } catch (error) {
+      displayMessage(`Failed to get Typst release info: ${error}`, "error");
+      return null;
     }
   };
 
@@ -148,8 +200,13 @@ export function usePandocManager() {
     discoverSources,
     getBestManager,
     useCustomPath,
-    updateBundledPandoc,
+    updateManagedPandoc,
+    updateBundledPandoc, // legacy alias
     checkBundledUpdate,
+    // New Typst methods
+    downloadTypst,
+    updateManagedTypst,
+    getLatestTypstRelease,
     initializePandoc,
     getSourceDisplayName,
     switchSource,

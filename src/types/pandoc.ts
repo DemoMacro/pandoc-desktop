@@ -12,7 +12,7 @@ export interface PandocInfo {
 // Pandoc source types for new manager system
 export interface PandocSource {
   Custom?: string;
-  Bundled?: null;
+  Managed?: null;
   System?: string;
 }
 

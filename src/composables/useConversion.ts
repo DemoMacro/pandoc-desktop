@@ -8,6 +8,8 @@ import { generateOutputFilenameWithExt } from "./useUtils";
 
 const isConverting = ref<boolean>(false);
 const progress = ref<number>(0);
+const selectedPdfEngine = ref<string | null>(null);
+const availablePdfEngines = ref<string[]>([]);
 
 const getFileName = (path: string): string => {
   return path.split(/[/\\]/).pop() || "";
@@ -24,6 +26,21 @@ export function useConversion() {
     notifyConversionError,
     notifyConversionStarted,
   } = useNotification();
+
+  // Load available PDF engines
+  const loadPdfEngines = async () => {
+    try {
+      const engines = await invoke<string[]>("get_available_pdf_engines");
+      availablePdfEngines.value = engines;
+      // Auto-select first engine (typst has highest priority)
+      if (engines.length > 0 && !selectedPdfEngine.value) {
+        selectedPdfEngine.value = engines[0];
+      }
+    } catch (error) {
+      console.warn("Failed to load PDF engines:", error);
+      availablePdfEngines.value = [];
+    }
+  };
 
   const canConvert = computed(() => {
     return (
@@ -68,6 +85,8 @@ export function useConversion() {
         inputFormat: null,
         outputFormat: outputFormat.value,
         customPandocPath: pandocInfo.value?.path || null,
+        pdfEngine:
+          outputFormat.value === "pdf" ? selectedPdfEngine.value : null,
       });
 
       progress.value = 100;
@@ -88,5 +107,9 @@ export function useConversion() {
     progress,
     canConvert,
     convertDocument,
+    // PDF engine support
+    selectedPdfEngine,
+    availablePdfEngines,
+    loadPdfEngines,
   };
 }

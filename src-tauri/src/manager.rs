@@ -1,13 +1,14 @@
-use crate::types::{GithubAsset, GithubRelease, VersionInfo, PandocInfo};
-use crate::utils::{format_file_size, get_pandoc_asset_patterns};
+use crate::types::{GithubAsset, GithubRelease, PandocInfo, VersionInfo};
+use crate::utils::format_file_size;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
-use tauri_plugin_http::reqwest;
 use tauri::{AppHandle, Manager};
+use tauri_plugin_http::reqwest;
 
 const UNGH_API_BASE: &str = "https://ungh.cc/repos";
 const PANDOC_REPO: &str = "jgm/pandoc";
+const TYPST_REPO: &str = "typst/typst";
 
 /// Mirror URLs for downloading (in order of preference)
 const DOWNLOAD_MIRRORS: &[&str] = &[
@@ -16,13 +17,39 @@ const DOWNLOAD_MIRRORS: &[&str] = &[
     "",                           // Original GitHub (empty prefix)
 ];
 
+/// Download types supported by the unified download system
+#[derive(Debug, Clone)]
+pub enum DownloadType {
+    Pandoc,
+    Typst,
+}
+
+/// Configuration for downloads
+#[derive(Debug, Clone)]
+pub struct DownloadConfig {
+    pub target_os: String,
+    pub target_arch: String,
+    pub use_mirrors: bool,
+}
+
+impl DownloadConfig {
+    /// Create download config for current platform (for runtime)
+    pub fn current_platform() -> Self {
+        Self {
+            target_os: std::env::consts::OS.to_string(),
+            target_arch: std::env::consts::ARCH.to_string(),
+            use_mirrors: true,
+        }
+    }
+}
+
 /// Pandoc source types with priority order
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PandocSource {
     /// Custom path set by user (highest priority)
     Custom(PathBuf),
-    /// Bundled/Portable pandoc (includes resources and app data directories)
-    Bundled,
+    /// Managed pandoc (bundled with app or downloaded portable)
+    Managed,
     /// System-detected pandoc (lowest priority)
     System(PathBuf),
 }
@@ -49,7 +76,7 @@ impl PandocManager {
     pub fn get_executable_path(&self, app_handle: &AppHandle) -> Option<PathBuf> {
         match &self.source {
             PandocSource::Custom(path) => Some(path.clone()),
-            PandocSource::Bundled => get_bundled_pandoc_path(app_handle),
+            PandocSource::Managed => get_managed_pandoc_path(app_handle),
             PandocSource::System(path) => Some(path.clone()),
         }
     }
@@ -88,75 +115,63 @@ impl PandocManager {
     }
 }
 
-/// Get bundled/portable pandoc path from multiple locations
-fn get_bundled_pandoc_path(app_handle: &AppHandle) -> Option<PathBuf> {
+/// Get managed pandoc path from multiple locations (unified bundled/portable logic)
+fn get_managed_pandoc_path(app_handle: &AppHandle) -> Option<PathBuf> {
     let pandoc_exe = if cfg!(windows) {
         "pandoc.exe"
     } else {
         "pandoc"
     };
 
-    // Priority 1: Check resources directory (bundled with app)
+    // Priority 1: Check resources directory (bundled with app during build)
     if let Ok(resource_dir) = app_handle.path().resource_dir() {
-        let bundled_paths = vec![
-            resource_dir.join("pandoc").join(&pandoc_exe),                    // Direct path
-            resource_dir.join("pandoc").join("bin").join(&pandoc_exe),        // In bin subdirectory
-        ];
-        
-        for path in bundled_paths {
-            if path.exists() {
-                return Some(path);
-            }
-        }
-        
-        // Check for pandoc in any subdirectory of resources/pandoc
-        let pandoc_dir = resource_dir.join("pandoc");
-        if let Ok(entries) = std::fs::read_dir(&pandoc_dir) {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                    let sub_paths = vec![
-                        entry.path().join(&pandoc_exe),
-                        entry.path().join("bin").join(&pandoc_exe),
-                    ];
-                    
-                    for path in sub_paths {
-                        if path.exists() {
-                            return Some(path);
-                        }
-                    }
-                }
-            }
+        let resource_pandoc_dir = resource_dir.join("pandoc");
+        if let Some(path) = find_pandoc_in_directory(&resource_pandoc_dir, &pandoc_exe) {
+            return Some(path);
         }
     }
 
-    // Priority 2: Check app data directory (portable installation)
+    // Priority 2: Check app data directory (portable downloaded by user)
     if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
-        let portable_dir = app_data_dir.join("pandoc-portable");
-        
-        let portable_paths = vec![
-            portable_dir.join(&pandoc_exe),                                   // Direct path
-            portable_dir.join("bin").join(&pandoc_exe),                       // In bin subdirectory
-        ];
-        
-        for path in portable_paths {
-            if path.exists() {
-                return Some(path);
-            }
+        let portable_pandoc_dir = app_data_dir.join("pandoc-portable");
+        if let Some(path) = find_pandoc_in_directory(&portable_pandoc_dir, &pandoc_exe) {
+            return Some(path);
         }
-        
-        // Check for pandoc in any subdirectory (version directories)
-        if let Ok(entries) = std::fs::read_dir(&portable_dir) {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                    let sub_paths = vec![
-                        entry.path().join(&pandoc_exe),
-                        entry.path().join("bin").join(&pandoc_exe),
-                    ];
-                    
-                    for path in sub_paths {
-                        if path.exists() {
-                            return Some(path);
-                        }
+    }
+
+    None
+}
+
+/// Find pandoc executable in a directory (with common subdirectory patterns)
+fn find_pandoc_in_directory(base_dir: &PathBuf, exe_name: &str) -> Option<PathBuf> {
+    if !base_dir.exists() {
+        return None;
+    }
+
+    // Check common locations
+    let candidate_paths = vec![
+        base_dir.join(exe_name),             // Direct path
+        base_dir.join("bin").join(exe_name), // In bin subdirectory
+    ];
+
+    for path in candidate_paths {
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    // Check for pandoc in any subdirectory (version directories are common)
+    if let Ok(entries) = std::fs::read_dir(base_dir) {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                let sub_paths = vec![
+                    entry.path().join(exe_name),
+                    entry.path().join("bin").join(exe_name),
+                ];
+
+                for path in sub_paths {
+                    if path.exists() {
+                        return Some(path);
                     }
                 }
             }
@@ -192,7 +207,11 @@ async fn validate_pandoc_executable(path: &PathBuf) -> Result<PandocInfo, String
         .unwrap_or_else(|_| {
             // Fallback to basic formats if detection fails
             (
-                vec!["markdown".to_string(), "html".to_string(), "docx".to_string()],
+                vec![
+                    "markdown".to_string(),
+                    "html".to_string(),
+                    "docx".to_string(),
+                ],
                 vec!["html".to_string(), "pdf".to_string(), "docx".to_string()],
             )
         });
@@ -211,17 +230,17 @@ async fn validate_pandoc_executable(path: &PathBuf) -> Result<PandocInfo, String
 /// Extract version number from pandoc version output
 fn extract_version_from_output(output: &str) -> String {
     let first_line = output.lines().next().unwrap_or("Unknown");
-    
+
     // Handle common format: "pandoc.exe 3.7.0.2" or "pandoc 3.7.0.2"
     let parts: Vec<&str> = first_line.trim().split_whitespace().collect();
-    
+
     // Look for version number in the parts (should be after program name)
     for part in &parts {
         // Skip program names
         if part.contains("pandoc") {
             continue;
         }
-        
+
         // Check if this part looks like a version number (starts with digit)
         if part.chars().next().map_or(false, |c| c.is_ascii_digit()) {
             // Extract version pattern (digits and dots)
@@ -233,13 +252,13 @@ fn extract_version_from_output(output: &str) -> String {
                     break;
                 }
             }
-            
+
             if !version.is_empty() && version != "." {
                 return version;
             }
         }
     }
-    
+
     // Fallback: return first line with pandoc names removed
     first_line
         .replace("pandoc.exe", "")
@@ -256,16 +275,16 @@ fn extract_version_from_output(output: &str) -> String {
 /// "3.7.0.2" -> "3.7.0.2"
 fn normalize_version(version_str: &str) -> String {
     let text = version_str.trim();
-    
+
     // Split by whitespace and look for version-like strings
     for part in text.split_whitespace() {
         // Skip common prefixes
         if part.contains("pandoc") {
             continue;
         }
-        
+
         let part = part.trim_start_matches('v');
-        
+
         // Check if this looks like a version number (starts with digit)
         if part.chars().next().map_or(false, |c| c.is_ascii_digit()) {
             // Extract version pattern manually
@@ -277,14 +296,14 @@ fn normalize_version(version_str: &str) -> String {
                     break;
                 }
             }
-            
+
             // Make sure we have a valid version (not just dots)
             if !version.is_empty() && version.chars().any(|c| c.is_ascii_digit()) {
                 return version;
             }
         }
     }
-    
+
     // Fallback: clean up the entire string
     let cleaned = text
         .replace("pandoc.exe", "")
@@ -293,7 +312,7 @@ fn normalize_version(version_str: &str) -> String {
         .trim_start_matches('v')
         .trim()
         .to_string();
-    
+
     if !cleaned.is_empty() {
         cleaned
     } else {
@@ -488,55 +507,14 @@ pub async fn get_version_info(current_version: Option<String>) -> Result<Version
 /// Download pandoc for current platform with improved asset selection
 #[tauri::command]
 pub async fn download_pandoc(version: String, download_dir: String) -> Result<String, String> {
-    let releases = get_pandoc_releases(Some(50)).await?;
-
-    let release = releases
-        .into_iter()
-        .find(|r| r.tag_name == version)
-        .ok_or_else(|| format!("Version {} not found", version))?;
-
-    // Try to find the best matching asset using priority order
-    let asset_patterns = get_pandoc_asset_patterns();
-    let mut selected_asset = None;
-    
-    for pattern in &asset_patterns {
-        if let Some(asset) = release.assets.iter().find(|a| a.name.contains(pattern)) {
-            selected_asset = Some(asset);
-            break;
-        }
-    }
-    
-    let asset = selected_asset.ok_or_else(|| {
-        let available_assets: Vec<String> = release.assets.iter()
-            .map(|a| a.name.clone())
-            .collect();
-        format!(
-            "No compatible asset found for current platform.\nAvailable assets: {}\nLooked for patterns: {:?}",
-            available_assets.join(", "),
-            asset_patterns
-        )
-    })?;
-
-    let download_path = PathBuf::from(&download_dir).join(&asset.name);
-
-    // Try different mirrors
-    for mirror in DOWNLOAD_MIRRORS {
-        let download_url = construct_mirror_url(mirror, &asset.download_url);
-
-        println!("Trying to download {} from mirror: {}", asset.name, mirror);
-
-        match download_file(&download_url, &download_path).await {
-            Ok(path) => {
-                return Ok(path);
-            }
-            Err(e) => {
-                println!("Mirror {} failed: {}", mirror, e);
-                continue;
-            }
-        }
-    }
-
-    Err("All download mirrors failed".to_string())
+    let config = DownloadConfig::current_platform();
+    download_tool(
+        DownloadType::Pandoc,
+        Some(version),
+        PathBuf::from(download_dir),
+        config,
+    )
+    .await
 }
 
 /// Download file with progress tracking
@@ -589,23 +567,7 @@ pub async fn extract_pandoc_archive(
     archive_path: String,
     extract_dir: String,
 ) -> Result<String, String> {
-    let archive_path = PathBuf::from(archive_path);
-    let extract_dir = PathBuf::from(extract_dir);
-
-    // Create extraction directory
-    std::fs::create_dir_all(&extract_dir)
-        .map_err(|e| format!("Failed to create extract directory: {}", e))?;
-
-    let extension = archive_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-
-    match extension {
-        "zip" => extract_zip(&archive_path, &extract_dir),
-        "gz" => extract_tar_gz(&archive_path, &extract_dir),
-        _ => Err(format!("Unsupported archive format: {}", extension)),
-    }
+    extract_archive_unified(PathBuf::from(archive_path), PathBuf::from(extract_dir)).await
 }
 
 /// Extract ZIP archive
@@ -677,7 +639,7 @@ pub async fn discover_pandoc_sources(app_handle: AppHandle) -> Vec<PandocManager
     let mut sources = Vec::new();
 
     // 1. Check bundled pandoc (highest priority after custom)
-    let bundled_source = PandocManager::new(PandocSource::Bundled);
+    let bundled_source = PandocManager::new(PandocSource::Managed);
     sources.push(bundled_source);
 
     // 2. Discover system pandoc installations
@@ -714,12 +676,12 @@ fn is_executable(path: &PathBuf) -> bool {
     #[cfg(windows)]
     {
         // On Windows, check if it's a .exe file or if it can be executed
-        path.extension().map_or(false, |ext| ext == "exe") || 
-        crate::utils::create_hidden_command(&path.to_string_lossy())
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+        path.extension().map_or(false, |ext| ext == "exe")
+            || crate::utils::create_hidden_command(&path.to_string_lossy())
+                .arg("--version")
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
     }
 }
 
@@ -732,12 +694,12 @@ pub fn create_custom_manager(custom_path: PathBuf) -> PandocManager {
 /// Create and validate a pandoc manager with custom path (Tauri command)
 #[tauri::command]
 pub async fn create_and_validate_custom_manager(
-    custom_path: String, 
-    app_handle: AppHandle
+    custom_path: String,
+    app_handle: AppHandle,
 ) -> Result<PandocManager, String> {
     let path = PathBuf::from(custom_path);
     let mut manager = PandocManager::new(PandocSource::Custom(path));
-    
+
     manager.validate(&app_handle).await?;
     Ok(manager)
 }
@@ -746,64 +708,41 @@ pub async fn create_and_validate_custom_manager(
 #[tauri::command]
 pub async fn get_best_pandoc_manager(app_handle: AppHandle) -> Option<PandocManager> {
     let sources = discover_pandoc_sources(app_handle.clone()).await;
-    
+
     for mut source in sources {
         if let Ok(()) = source.validate(&app_handle).await {
             return Some(source);
         }
     }
-    
+
     None
 }
 
-/// Update bundled pandoc by downloading latest version
+/// Update bundled pandoc by downloading latest version (legacy function)
 #[tauri::command]
 pub async fn update_bundled_pandoc(app_handle: AppHandle) -> Result<String, String> {
-    // Get latest release
-    let latest_release = get_latest_pandoc_release().await?;
-    let version = latest_release.tag_name.clone();
-    
-    // Get resource directory
-    let resource_dir = app_handle.path().resource_dir()
-        .map_err(|e| format!("Failed to get resource directory: {}", e))?;
-    
-    let pandoc_dir = resource_dir.join("pandoc");
-    
-    // Create directory if it doesn't exist
-    std::fs::create_dir_all(&pandoc_dir)
-        .map_err(|e| format!("Failed to create pandoc directory: {}", e))?;
-    
-    // Download pandoc to resource directory
-    let download_path = download_pandoc(
-        version.clone(), 
-        pandoc_dir.to_string_lossy().to_string()
-    ).await?;
-    
-    // Extract the archive (this will overwrite existing files)
-    let extract_dir = pandoc_dir.to_string_lossy().to_string();
-    extract_pandoc_archive(download_path, extract_dir).await?;
-    
-    Ok(format!("Successfully updated bundled pandoc to version {}", version))
+    update_managed_pandoc(app_handle).await
 }
 
 /// Check if bundled pandoc needs update
 #[tauri::command]
 pub async fn check_bundled_pandoc_update(app_handle: AppHandle) -> Result<bool, String> {
     // Get current bundled pandoc version
-    let mut bundled_manager = PandocManager::new(PandocSource::Bundled);
+    let mut bundled_manager = PandocManager::new(PandocSource::Managed);
     let current_version = if bundled_manager.validate(&app_handle).await.is_ok() {
-        bundled_manager.get_info()
+        bundled_manager
+            .get_info()
             .map(|info| info.version.clone())
             .unwrap_or_else(|| "unknown".to_string())
     } else {
         "none".to_string()
     };
-    
+
     // Get latest version
     let latest_release = get_latest_pandoc_release().await?;
     let latest_version = extract_clean_version(&latest_release.tag_name);
     let current_clean = extract_clean_version(&current_version);
-    
+
     // Simple version comparison
     Ok(current_clean != latest_version)
 }
@@ -817,4 +756,425 @@ fn extract_clean_version(version: &str) -> String {
         .next()
         .unwrap_or(version)
         .to_string()
+}
+
+/// Unified download interface for different tools
+pub async fn download_tool(
+    download_type: DownloadType,
+    version: Option<String>,
+    target_dir: PathBuf,
+    config: DownloadConfig,
+) -> Result<String, String> {
+    match download_type {
+        DownloadType::Pandoc => {
+            let version = if let Some(v) = version {
+                v
+            } else {
+                let latest = get_latest_pandoc_release().await?;
+                latest.tag_name
+            };
+            download_pandoc_internal(version, target_dir, config).await
+        }
+        DownloadType::Typst => {
+            let version = if let Some(v) = version {
+                v
+            } else {
+                let latest = get_latest_typst_release(&config).await?;
+                latest.tag_name
+            };
+            download_typst_internal(version, target_dir, config).await
+        }
+    }
+}
+
+/// Internal pandoc download function with enhanced config support
+async fn download_pandoc_internal(
+    version: String,
+    download_dir: PathBuf,
+    config: DownloadConfig,
+) -> Result<String, String> {
+    let releases = get_pandoc_releases(Some(50)).await?;
+
+    let release = releases
+        .into_iter()
+        .find(|r| r.tag_name == version)
+        .ok_or_else(|| format!("Version {} not found", version))?;
+
+    // Find the best matching asset using platform-specific patterns
+    let asset_patterns =
+        get_pandoc_asset_patterns_for_platform(&config.target_os, &config.target_arch);
+    let mut selected_asset = None;
+
+    for pattern in &asset_patterns {
+        if let Some(asset) = release.assets.iter().find(|a| a.name.contains(pattern)) {
+            selected_asset = Some(asset);
+            break;
+        }
+    }
+
+    let asset = selected_asset.ok_or_else(|| {
+        let available_assets: Vec<String> = release.assets.iter().map(|a| a.name.clone()).collect();
+        format!(
+            "No compatible asset found for {}-{}.\nAvailable assets: {}\nLooked for patterns: {:?}",
+            config.target_os,
+            config.target_arch,
+            available_assets.join(", "),
+            asset_patterns
+        )
+    })?;
+
+    let download_path = download_dir.join(&asset.name);
+
+    // Try different mirrors if enabled
+    if config.use_mirrors {
+        for mirror in DOWNLOAD_MIRRORS {
+            let download_url = construct_mirror_url(mirror, &asset.download_url);
+            println!(
+                "Trying to download {} from mirror: {}",
+                asset.name,
+                if mirror.is_empty() { "GitHub" } else { mirror }
+            );
+
+            match download_file(&download_url, &download_path).await {
+                Ok(path) => return Ok(path),
+                Err(e) => {
+                    println!(
+                        "Mirror {} failed: {}",
+                        if mirror.is_empty() { "GitHub" } else { mirror },
+                        e
+                    );
+                    continue;
+                }
+            }
+        }
+        Err("All download mirrors failed".to_string())
+    } else {
+        download_file(&asset.download_url, &download_path).await
+    }
+}
+
+/// Get latest Typst release information
+async fn get_latest_typst_release(config: &DownloadConfig) -> Result<GithubRelease, String> {
+    // Use GitHub API directly for Typst since UNGH might not have it
+    let url = format!(
+        "https://api.github.com/repos/{}/releases/latest",
+        TYPST_REPO
+    );
+
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Failed to fetch Typst release info: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitHub API request failed with status: {}",
+            response.status()
+        ));
+    }
+
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    let release_data: serde_json::Value =
+        serde_json::from_str(&response_text).map_err(|e| format!("Failed to parse JSON: {}", e))?;
+
+    parse_github_release(release_data, config)
+}
+
+/// Parse GitHub API response to GithubRelease
+fn parse_github_release(
+    data: serde_json::Value,
+    _config: &DownloadConfig,
+) -> Result<GithubRelease, String> {
+    let tag_name = data["tag_name"].as_str().unwrap_or("").to_string();
+    let name = data["name"].as_str().unwrap_or(&tag_name).to_string();
+    let body = data["body"].as_str().unwrap_or("").to_string();
+    let published_at = data["published_at"].as_str().unwrap_or("").to_string();
+
+    // Parse actual assets from GitHub API
+    let empty_vec = vec![];
+    let assets_data = data["assets"].as_array().unwrap_or(&empty_vec);
+    let mut assets = Vec::new();
+
+    for asset_data in assets_data {
+        if let (Some(name), Some(download_url), Some(size)) = (
+            asset_data["name"].as_str(),
+            asset_data["browser_download_url"].as_str(),
+            asset_data["size"].as_u64(),
+        ) {
+            assets.push(GithubAsset {
+                name: name.to_string(),
+                download_url: download_url.to_string(),
+                size,
+                content_type: asset_data["content_type"]
+                    .as_str()
+                    .unwrap_or("application/octet-stream")
+                    .to_string(),
+            });
+        }
+    }
+
+    Ok(GithubRelease {
+        tag_name,
+        name,
+        body,
+        published_at,
+        assets,
+    })
+}
+
+/// Internal typst download function
+async fn download_typst_internal(
+    _version: String,
+    download_dir: PathBuf,
+    config: DownloadConfig,
+) -> Result<String, String> {
+    let release = get_latest_typst_release(&config).await?;
+
+    // Find the appropriate asset for the target platform
+    let asset_pattern = get_typst_asset_pattern(&config.target_os, &config.target_arch);
+    let asset = release.assets.iter()
+        .find(|a| a.name.contains(&asset_pattern))
+        .ok_or_else(|| {
+            let available_assets: Vec<String> = release.assets.iter()
+                .map(|a| a.name.clone())
+                .collect();
+            format!(
+                "No compatible Typst asset found for {}-{}.\nAvailable assets: {}\nLooked for pattern: {}",
+                config.target_os, config.target_arch,
+                available_assets.join(", "),
+                asset_pattern
+            )
+        })?;
+
+    let download_path = download_dir.join(&asset.name);
+
+    // Try different mirrors if enabled (GitHub mirrors also work for other repos)
+    if config.use_mirrors {
+        for mirror in DOWNLOAD_MIRRORS {
+            let download_url = construct_mirror_url(mirror, &asset.download_url);
+            println!(
+                "Trying to download {} from mirror: {}",
+                asset.name,
+                if mirror.is_empty() { "GitHub" } else { mirror }
+            );
+
+            match download_file(&download_url, &download_path).await {
+                Ok(path) => return Ok(path),
+                Err(e) => {
+                    println!(
+                        "Mirror {} failed: {}",
+                        if mirror.is_empty() { "GitHub" } else { mirror },
+                        e
+                    );
+                    continue;
+                }
+            }
+        }
+        Err("All download mirrors failed".to_string())
+    } else {
+        download_file(&asset.download_url, &download_path).await
+    }
+}
+
+/// Get pandoc asset patterns for specific platform
+fn get_pandoc_asset_patterns_for_platform(target_os: &str, target_arch: &str) -> Vec<String> {
+    match (target_os, target_arch) {
+        ("windows", "x86_64") => vec!["windows-x86_64.zip".to_string()],
+        ("windows", _) => vec!["windows-x86_64.zip".to_string()], // Default to x86_64
+        ("macos", "aarch64") => vec!["arm64-macOS.zip".to_string(), "macOS.zip".to_string()],
+        ("macos", "x86_64") => vec!["x86_64-macOS.zip".to_string(), "macOS.zip".to_string()],
+        ("macos", _) => vec!["macOS.zip".to_string()], // Generic macOS
+        ("linux", "aarch64") => vec![
+            "linux-arm64.tar.gz".to_string(),
+            "linux-amd64.tar.gz".to_string(),
+        ],
+        ("linux", "x86_64") => vec!["linux-amd64.tar.gz".to_string()],
+        ("linux", _) => vec!["linux-amd64.tar.gz".to_string()], // Default to amd64
+        _ => crate::utils::get_pandoc_asset_patterns()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect(), // Fallback to original logic
+    }
+}
+
+/// Get typst asset pattern for specific platform
+fn get_typst_asset_pattern(target_os: &str, target_arch: &str) -> String {
+    match (target_os, target_arch) {
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc".to_string(),
+        ("windows", _) => "x86_64-pc-windows-msvc".to_string(), // Default to x86_64
+        ("macos", "aarch64") => "aarch64-apple-darwin".to_string(),
+        ("macos", "x86_64") => "x86_64-apple-darwin".to_string(),
+        ("macos", _) => "x86_64-apple-darwin".to_string(), // Default to x86_64
+        ("linux", "aarch64") => "aarch64-unknown-linux-musl".to_string(),
+        ("linux", "x86_64") => "x86_64-unknown-linux-musl".to_string(),
+        ("linux", _) => "x86_64-unknown-linux-musl".to_string(), // Default to x86_64
+        _ => "x86_64-unknown-linux-musl".to_string(),            // Generic fallback
+    }
+}
+
+/// Extract archive with unified logic
+pub async fn extract_archive_unified(
+    archive_path: PathBuf,
+    extract_dir: PathBuf,
+) -> Result<String, String> {
+    // Create extraction directory
+    std::fs::create_dir_all(&extract_dir)
+        .map_err(|e| format!("Failed to create extract directory: {}", e))?;
+
+    let extension = archive_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    match extension {
+        "zip" => extract_zip(&archive_path, &extract_dir),
+        "gz" => {
+            // Handle .tar.gz and .tar.xz
+            let file_name = archive_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            if file_name.contains(".tar.") {
+                extract_tar_gz(&archive_path, &extract_dir)
+            } else {
+                Err(format!("Unsupported .gz format: {}", file_name))
+            }
+        }
+        "xz" => {
+            let file_name = archive_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            if file_name.contains(".tar.") {
+                extract_tar_xz(&archive_path, &extract_dir)
+            } else {
+                Err(format!("Unsupported .xz format: {}", file_name))
+            }
+        }
+        _ => Err(format!("Unsupported archive format: {}", extension)),
+    }
+}
+
+/// Extract TAR.XZ archive (for Typst)
+fn extract_tar_xz(archive_path: &PathBuf, extract_dir: &PathBuf) -> Result<String, String> {
+    use std::io::BufReader;
+
+    let file =
+        std::fs::File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
+    let mut reader = BufReader::new(file);
+
+    // Decompress XZ first
+    let mut decompressed = Vec::new();
+    lzma_rs::xz_decompress(&mut reader, &mut decompressed)
+        .map_err(|e| format!("Failed to decompress XZ: {}", e))?;
+
+    // Then extract TAR
+    let mut archive = tar::Archive::new(std::io::Cursor::new(decompressed));
+    archive
+        .unpack(extract_dir)
+        .map_err(|e| format!("Failed to extract TAR.XZ archive: {}", e))?;
+
+    Ok(extract_dir.to_string_lossy().to_string())
+}
+
+/// Download Typst for current platform
+#[tauri::command]
+pub async fn download_typst(
+    version: Option<String>,
+    download_dir: String,
+) -> Result<String, String> {
+    let config = DownloadConfig::current_platform();
+    download_tool(
+        DownloadType::Typst,
+        version,
+        PathBuf::from(download_dir),
+        config,
+    )
+    .await
+}
+
+/// Get latest Typst release information (public command)
+#[tauri::command]
+pub async fn get_latest_typst_release_info() -> Result<GithubRelease, String> {
+    let config = DownloadConfig::current_platform();
+    get_latest_typst_release(&config).await
+}
+
+/// Update managed pandoc by downloading latest version  
+#[tauri::command]
+pub async fn update_managed_pandoc(app_handle: AppHandle) -> Result<String, String> {
+    // Get latest release
+    let latest_release = get_latest_pandoc_release().await?;
+    let version = latest_release.tag_name.clone();
+
+    // Get resource directory
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource directory: {}", e))?;
+
+    let pandoc_dir = resource_dir.join("pandoc");
+
+    // Create directory if it doesn't exist
+    std::fs::create_dir_all(&pandoc_dir)
+        .map_err(|e| format!("Failed to create pandoc directory: {}", e))?;
+
+    // Download pandoc to resource directory
+    let config = DownloadConfig::current_platform();
+    let download_path = download_tool(
+        DownloadType::Pandoc,
+        Some(version.clone()),
+        pandoc_dir.clone(),
+        config,
+    )
+    .await?;
+
+    // Extract the archive (this will overwrite existing files)
+    extract_archive_unified(PathBuf::from(download_path), pandoc_dir).await?;
+
+    Ok(format!(
+        "Successfully updated managed pandoc to version {}",
+        version
+    ))
+}
+
+/// Update managed typst by downloading latest version
+#[tauri::command]
+pub async fn update_managed_typst(app_handle: AppHandle) -> Result<String, String> {
+    // Get latest release
+    let config = DownloadConfig::current_platform();
+    let latest_release = get_latest_typst_release(&config).await?;
+    let version = latest_release.tag_name.clone();
+
+    // Get resource directory
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource directory: {}", e))?;
+
+    let typst_dir = resource_dir.join("typst");
+
+    // Create directory if it doesn't exist
+    std::fs::create_dir_all(&typst_dir)
+        .map_err(|e| format!("Failed to create typst directory: {}", e))?;
+
+    // Download typst to resource directory
+    let download_path = download_tool(
+        DownloadType::Typst,
+        Some(version.clone()),
+        typst_dir.clone(),
+        config,
+    )
+    .await?;
+
+    // Extract the archive
+    extract_archive_unified(PathBuf::from(download_path), typst_dir).await?;
+
+    Ok(format!(
+        "Successfully updated managed typst to version {}",
+        version
+    ))
 }

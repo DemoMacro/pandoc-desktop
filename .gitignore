@@ -131,4 +131,4 @@ dist
 
 # tauri
 src-tauri/target
-src-tauri/resources/pandoc
+src-tauri/resources

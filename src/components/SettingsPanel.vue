@@ -43,10 +43,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useUI } from "../composables/useUI";
-import { useMessages } from "../composables/useMessages";
 
 const { showSettings, closeSettings } = useUI();
-const { displayMessage } = useMessages();
 
 // Settings state
 const selectedTheme = ref<"auto" | "light" | "dark">("auto");

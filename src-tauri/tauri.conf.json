@@ -35,6 +35,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/pandoc/**/*"]
+    "resources": ["resources/pandoc/**/*", "resources/typst/**/*"]
   }
 }

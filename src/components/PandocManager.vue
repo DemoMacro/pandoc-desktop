@@ -133,7 +133,7 @@
       </section>
 
       <section>
-        <h4>📦 Portable Pandoc</h4>
+        <h4>📦 Managed Pandoc</h4>
         <p>
           <small
             >Install Pandoc directly into this application (no system
@@ -142,27 +142,31 @@
         </p>
 
         <div v-if="portablePandocStatus.checking" class="status-checking">
-          <p>🔍 Checking portable Pandoc...</p>
+          <p>🔍 Checking managed Pandoc...</p>
         </div>
 
         <div
           v-else-if="portablePandocStatus.available"
           class="status-available"
         >
-          <p>✅ Portable Pandoc is installed and ready</p>
+          <p>✅ Managed Pandoc is installed and ready</p>
           <details>
-            <summary>Portable Installation Info</summary>
+            <summary>Managed Installation Info</summary>
             <p>
               <small
-                >Portable Pandoc eliminates the need for system-wide Pandoc
-                installation.</small
+                >Managed Pandoc provides a self-contained installation that's
+                automatically managed by the application. This includes both
+                bundled Pandoc (shipped with the app) and portable installations
+                (downloaded separately). It's automatically prioritized when
+                available, ensuring consistent behavior across different
+                systems.</small
               >
             </p>
           </details>
         </div>
 
         <div v-else class="status-not-available">
-          <p>📦 Portable Pandoc not installed</p>
+          <p>📦 Managed Pandoc not installed</p>
           <div class="grid">
             <button
               @click="installPortablePandoc"
@@ -173,7 +177,7 @@
               {{
                 portablePandocStatus.installing
                   ? "⬇️ Installing..."
-                  : "📥 Install Portable Pandoc"
+                  : "📥 Install Managed Pandoc"
               }}
             </button>
             <button
@@ -256,7 +260,7 @@
         <p>
           <small>
             This manager handles all Pandoc-related operations including
-            installation detection, version management, and portable
+            installation detection, version management, and managed
             installation. It automatically checks for the latest Pandoc releases
             using GitHub's API with multiple download mirrors for reliability.
           </small>
@@ -307,7 +311,7 @@ const downloadProgress = ref({
   current_mirror: "",
 });
 
-// Portable Pandoc status (keeping legacy support for now)
+// Managed Pandoc status (unified bundled/portable concept)
 const portablePandocStatus = ref({
   available: false,
   checking: false,
@@ -366,7 +370,7 @@ const checkForUpdates = async (): Promise<boolean> => {
       displayMessage(`Update available: ${latestVersion.value}`, "info");
     } else {
       displayMessage(
-        "✅ Already up to date! You have the latest version.",
+        "Already up to date! You have the latest version.",
         "success",
       );
     }
@@ -391,14 +395,14 @@ const downloadLatestVersion = async (): Promise<void> => {
   }
 };
 
-// Portable Pandoc functions
+// Managed Pandoc functions
 const checkPortablePandoc = async () => {
   portablePandocStatus.value.checking = true;
   try {
     const isAvailable = await invoke<boolean>("check_portable_pandoc");
     portablePandocStatus.value.available = isAvailable;
   } catch (error) {
-    console.warn("Failed to check portable Pandoc:", error);
+    console.warn("Failed to check managed Pandoc:", error);
     portablePandocStatus.value.available = false;
   } finally {
     portablePandocStatus.value.checking = false;
@@ -411,10 +415,10 @@ const installPortablePandoc = async () => {
     const result = await invoke<string>("install_portable_pandoc");
     displayMessage(result, "success");
     portablePandocStatus.value.available = true;
-    // Reload Pandoc info to pick up the new portable installation
+    // Reload Pandoc info to pick up the new managed installation
     await loadPandocInfo();
   } catch (error) {
-    displayMessage(`Failed to install portable Pandoc: ${error}`, "error");
+    displayMessage(`Failed to install managed Pandoc: ${error}`, "error");
   } finally {
     portablePandocStatus.value.installing = false;
   }

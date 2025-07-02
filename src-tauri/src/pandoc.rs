@@ -1,66 +1,46 @@
 use crate::types::PandocInfo;
 use crate::utils::{get_search_paths, validate_pandoc_executable};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tauri::Manager;
 
-/// Get the portable Pandoc directory path
-fn get_portable_pandoc_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
-    
-    Ok(app_data_dir.join("pandoc-portable"))
+/// Get the default PDF engine for a given output format (based on pandoc manual)
+fn get_default_pdf_engine(output_format: &str) -> &'static str {
+    match output_format {
+        "latex" => "pdflatex",
+        "context" => "context",
+        "html" => "wkhtmltopdf",
+        "ms" => "pdfroff",
+        "typst" => "typst",
+        _ => "pdflatex", // Default for most cases
+    }
 }
 
-/// Get the expected path to portable Pandoc executable
-fn get_portable_pandoc_path(app_handle: &tauri::AppHandle) -> Result<String, String> {
-    let portable_dir = get_portable_pandoc_dir(app_handle)?;
-    let exe_name = if cfg!(target_os = "windows") {
-        "pandoc.exe"
-    } else {
-        "pandoc"
+/// Get available PDF engines for a given output format (in priority order)
+fn get_pdf_engines_for_format(output_format: &str) -> Vec<&'static str> {
+    let engines = match output_format {
+        "latex" => vec!["pdflatex", "xelatex", "lualatex", "tectonic", "latexmk"],
+        "context" => vec!["context"],
+        "html" => vec!["wkhtmltopdf", "weasyprint", "prince", "pagedjs-cli"],
+        "ms" => vec!["pdfroff"],
+        "typst" => vec!["typst"],
+        _ => vec![
+            "pdflatex",
+            "xelatex",
+            "lualatex",
+            "wkhtmltopdf",
+            "weasyprint",
+            "typst",
+        ],
     };
-    
-    // Look for pandoc in bin subdirectory (common in extracted archives)
-    let bin_path = portable_dir.join("bin").join(exe_name);
-    if bin_path.exists() {
-        return Ok(bin_path.to_string_lossy().to_string());
-    }
-    
-    // Look for pandoc in root of portable directory
-    let root_path = portable_dir.join(exe_name);
-    if root_path.exists() {
-        return Ok(root_path.to_string_lossy().to_string());
-    }
-    
-    // Look for pandoc in any subdirectory (pandoc archives often have version dirs)
-    if let Ok(entries) = std::fs::read_dir(&portable_dir) {
-        for entry in entries.flatten() {
-            if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                let sub_bin = entry.path().join("bin").join(exe_name);
-                if sub_bin.exists() {
-                    return Ok(sub_bin.to_string_lossy().to_string());
-                }
-                
-                let sub_root = entry.path().join(exe_name);
-                if sub_root.exists() {
-                    return Ok(sub_root.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-    
-    Err("Portable Pandoc executable not found".to_string())
+
+    engines
 }
 
 /// Check if portable Pandoc is available and working
 #[tauri::command]
 pub async fn check_portable_pandoc(app_handle: tauri::AppHandle) -> Result<bool, String> {
-    match get_portable_pandoc_path(&app_handle) {
-        Ok(pandoc_path) => Ok(validate_pandoc_executable(&pandoc_path)),
-        Err(_) => Ok(false),
-    }
+    let managed_source = crate::manager::PandocManager::new(crate::manager::PandocSource::Managed);
+    Ok(managed_source.get_executable_path(&app_handle).is_some())
 }
 
 /// Install portable pandoc with improved download selection
@@ -69,28 +49,34 @@ pub async fn install_portable_pandoc(app_handle: tauri::AppHandle) -> Result<Str
     // Get latest release
     let latest_release = crate::manager::get_latest_pandoc_release().await?;
     let version = latest_release.tag_name;
-    
-    // Get portable pandoc directory
-    let portable_dir = get_portable_pandoc_dir(&app_handle)?;
-    
+
+    // Get app data directory for portable installation
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
+
+    let portable_dir = app_data_dir.join("pandoc-portable");
+
     // Create directory if it doesn't exist
     std::fs::create_dir_all(&portable_dir)
         .map_err(|e| format!("Failed to create portable directory: {}", e))?;
-    
+
     // Download pandoc to portable directory
     let download_path = crate::manager::download_pandoc(
-        version.clone(), 
-        portable_dir.to_string_lossy().to_string()
-    ).await?;
-    
+        version.clone(),
+        portable_dir.to_string_lossy().to_string(),
+    )
+    .await?;
+
     // Extract the archive
     let extract_dir = portable_dir.to_string_lossy().to_string();
-    let extracted_path = crate::manager::extract_pandoc_archive(
-        download_path, 
-        extract_dir
-    ).await?;
-    
-    Ok(format!("Successfully installed portable Pandoc {} to {}", version, extracted_path))
+    let extracted_path = crate::manager::extract_pandoc_archive(download_path, extract_dir).await?;
+
+    Ok(format!(
+        "Successfully installed portable Pandoc {} to {}",
+        version, extracted_path
+    ))
 }
 
 /// Find all possible pandoc installations
@@ -110,28 +96,21 @@ pub fn find_all_pandoc_paths() -> Vec<String> {
     valid_paths
 }
 
-/// Enhanced get pandoc info that checks bundled and portable installation first
+/// Enhanced get pandoc info that checks managed installation first
 #[tauri::command]
 pub async fn get_pandoc_info_with_portable(
     app_handle: tauri::AppHandle,
     custom_path: Option<String>,
 ) -> Result<PandocInfo, String> {
-    // First try bundled pandoc (highest priority)
-    if let Ok(bundled_path) = get_bundled_pandoc_executable_path(&app_handle) {
-        if validate_pandoc_executable(&bundled_path) {
-            println!("Using bundled Pandoc: {}", bundled_path);
-            return get_pandoc_info(Some(bundled_path)).await;
+    // First try managed pandoc (unified bundled/portable)
+    let managed_source = crate::manager::PandocManager::new(crate::manager::PandocSource::Managed);
+    if let Some(managed_path) = managed_source.get_executable_path(&app_handle) {
+        if validate_pandoc_executable(&managed_path.to_string_lossy()) {
+            println!("Using managed Pandoc: {}", managed_path.display());
+            return get_pandoc_info(Some(managed_path.to_string_lossy().to_string())).await;
         }
     }
-    
-    // Then try portable pandoc
-    if let Ok(portable_path) = get_portable_pandoc_path(&app_handle) {
-        if validate_pandoc_executable(&portable_path) {
-            println!("Using portable Pandoc: {}", portable_path);
-            return get_pandoc_info(Some(portable_path)).await;
-        }
-    }
-    
+
     // Fallback to regular detection
     get_pandoc_info(custom_path).await
 }
@@ -160,7 +139,9 @@ pub async fn get_pandoc_info(custom_path: Option<String>) -> Result<PandocInfo, 
     };
 
     // Check if pandoc exists and get version
-    let version_output = crate::utils::create_hidden_command(&pandoc_cmd).arg("--version").output();
+    let version_output = crate::utils::create_hidden_command(&pandoc_cmd)
+        .arg("--version")
+        .output();
 
     match version_output {
         Ok(output) if output.status.success() => {
@@ -216,7 +197,9 @@ pub async fn validate_pandoc_path(path: String) -> Result<bool, String> {
         return Ok(false);
     }
 
-    let output = crate::utils::create_hidden_command(&path).arg("--version").output();
+    let output = crate::utils::create_hidden_command(&path)
+        .arg("--version")
+        .output();
 
     match output {
         Ok(output) => Ok(output.status.success()),
@@ -390,31 +373,29 @@ pub fn get_supported_formats(pandoc_cmd: &str) -> Result<(Vec<String>, Vec<Strin
     Ok((input_formats, output_formats))
 }
 
-/// Helper function to find pandoc with same priority as detection
+/// Helper function to find pandoc with unified priority logic
 fn find_pandoc_with_priority(app_handle: &tauri::AppHandle) -> Result<String, String> {
-    // 1. Try bundled pandoc first
-    if let Ok(bundled_path) = get_bundled_pandoc_executable_path(app_handle) {
-        if validate_pandoc_executable(&bundled_path) {
-            return Ok(bundled_path);
+    // 1. Try managed pandoc first (unified bundled/portable)
+    let managed_source = crate::manager::PandocManager::new(crate::manager::PandocSource::Managed);
+    if let Some(managed_path) = managed_source.get_executable_path(app_handle) {
+        if validate_pandoc_executable(&managed_path.to_string_lossy()) {
+            let path_str = managed_path.to_string_lossy().to_string();
+            return Ok(path_str);
         }
     }
-    
-    // 2. Try portable pandoc
-    if let Ok(portable_path) = get_portable_pandoc_path(app_handle) {
-        if validate_pandoc_executable(&portable_path) {
-            return Ok(portable_path);
-        }
-    }
-    
-    // 3. Try system paths
+
+    // 2. Try system paths
     let detected_paths = find_all_pandoc_paths();
+
     if detected_paths.is_empty() {
         return Err("Pandoc not found. Please check your installation or specify a custom path in settings.".to_string());
     }
-    Ok(detected_paths[0].clone())
+
+    let path_str = detected_paths[0].clone();
+    Ok(path_str)
 }
 
-/// Enhanced pandoc conversion with improved PDF engine handling
+/// Enhanced pandoc conversion with correct PDF engine handling
 #[tauri::command]
 pub async fn convert_with_pandoc(
     input_file: String,
@@ -422,13 +403,15 @@ pub async fn convert_with_pandoc(
     input_format: Option<String>,
     output_format: String,
     custom_pandoc_path: Option<String>,
+    pdf_engine: Option<String>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    // Determine which pandoc path to use with same priority as detection
+    // Determine which pandoc path to use with unified priority logic
     let pandoc_cmd = if let Some(custom_path) = custom_pandoc_path {
         custom_path
     } else {
-        find_pandoc_with_priority(&app_handle)?
+        let detected_path = find_pandoc_with_priority(&app_handle)?;
+        detected_path
     };
 
     // Validate output format only (input format is optional for auto-detection)
@@ -471,25 +454,57 @@ pub async fn convert_with_pandoc(
     args.push("-t".to_string());
     args.push(output_format.clone());
 
-    // Special handling for PDF output
+    // Special handling for PDF output with correct engine selection
     if output_format == "pdf" {
-        // Try alternative PDF engines if default fails
         args.push("--pdf-engine".to_string());
-        
-        // Check which PDF engines are available
-        let available_engines = check_available_pdf_engines();
-        if let Some(engine) = available_engines.first() {
-            args.push(engine.clone());
+
+        // Use user-specified engine or determine best default for output format
+        let engine_to_use = if let Some(user_engine) = pdf_engine {
+            // Validate that the user-specified engine is available
+            let available_engines =
+                check_available_pdf_engines_for_format(&output_format, &app_handle);
+
+            if available_engines.contains(&user_engine) {
+                user_engine
+            } else {
+                return Err(format!(
+                    "Specified PDF engine '{}' is not available.\n\
+                     Available engines for PDF output: {}",
+                    user_engine,
+                    available_engines.join(", ")
+                ));
+            }
         } else {
-            return Err(format!(
-                "PDF conversion failed: No PDF engine found.\n\n\
-                To convert to PDF, please install one of the following:\n\
-                • LaTeX distribution (TeX Live, MiKTeX): provides pdflatex, xelatex, lualatex\n\
-                • wkhtmltopdf: lightweight HTML to PDF converter\n\
-                • weasyprint: Python-based PDF generator\n\n\
-                Alternatively, try converting to HTML first, then use a browser to print to PDF."
-            ));
-        }
+            // Auto-select best available engine for this output format
+            let default_engine = get_default_pdf_engine(&output_format);
+            let available_engines =
+                check_available_pdf_engines_for_format(&output_format, &app_handle);
+
+            // Try default engine first, then fallback to any available
+            if available_engines.contains(&default_engine.to_string()) {
+                default_engine.to_string()
+            } else if let Some(engine) = available_engines.first() {
+                engine.clone()
+            } else {
+                return Err(format!(
+                    "PDF conversion failed: No PDF engine found for output format '{}'.\n\n\
+                     Recommended PDF engines for {}:\n\
+                     {}\n\n\
+                     Installation guides:\n\
+                     • typst: 'cargo install typst-cli' or download from GitHub releases\n\
+                     • wkhtmltopdf: Download from https://wkhtmltopdf.org/\n\
+                     • weasyprint: 'pip install weasyprint'\n\
+                     • LaTeX distribution (TeX Live, MiKTeX): For academic publishing\n\n\
+                     Alternatively, try converting to HTML first, then use a browser to print to PDF.",
+                     output_format,
+                     output_format,
+                     get_pdf_engines_for_format(&output_format).join(", ")
+                ));
+            }
+        };
+
+        // Use the engine directly (it may already be a full path from get_best_typst_path)
+        args.push(engine_to_use);
     }
 
     // Add input and output files
@@ -498,8 +513,14 @@ pub async fn convert_with_pandoc(
     args.push(output_file.clone());
 
     // Execute conversion
+    // Set proper working directory for pandoc execution
+    let working_dir = std::path::Path::new(&input_file)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+
     let output = crate::utils::create_hidden_command(&pandoc_cmd)
         .args(&args)
+        .current_dir(&working_dir)
         .output()
         .map_err(|e| format!("Failed to execute pandoc at '{}': {}", pandoc_cmd, e))?;
 
@@ -511,19 +532,17 @@ pub async fn convert_with_pandoc(
     } else {
         let error_msg =
             String::from_utf8(output.stderr).unwrap_or_else(|_| "Unknown pandoc error".to_string());
-        
+
         // Provide helpful error messages for common PDF issues
-        if output_format == "pdf" && error_msg.contains("pdflatex not found") {
+        if output_format == "pdf" && error_msg.contains("not found") {
             Err(format!(
-                "PDF conversion failed: LaTeX not found.\n\n\
+                "PDF conversion failed: Required engine not found.\n\n\
                 Solutions:\n\
-                1. Install a LaTeX distribution:\n\
-                   • Windows: MiKTeX (https://miktex.org/)\n\
-                   • macOS: MacTeX (https://www.tug.org/mactex/)\n\
-                   • Linux: TeX Live (sudo apt install texlive-full)\n\n\
-                2. Alternative: Convert to HTML first, then print to PDF from browser\n\n\
-                3. Install wkhtmltopdf for direct HTML→PDF conversion\n\n\
-                Original error: {}", error_msg.trim()
+                1. Install the recommended PDF engine for this format\n\
+                2. Alternative: Convert to HTML first, then print to PDF from browser\n\
+                3. Try a different output format (html, docx, etc.)\n\n\
+                Original error: {}",
+                error_msg.trim()
             ))
         } else {
             Err(format!("Pandoc conversion failed: {}", error_msg.trim()))
@@ -531,23 +550,132 @@ pub async fn convert_with_pandoc(
     }
 }
 
-/// Check which PDF engines are available on the system
-fn check_available_pdf_engines() -> Vec<String> {
-    let engines = vec!["pdflatex", "xelatex", "lualatex", "wkhtmltopdf", "weasyprint"];
+/// Get available PDF engines for specific output format
+#[tauri::command]
+pub async fn get_available_pdf_engines(
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<String>, String> {
+    // Default to "pdf" format if not specified
+    Ok(check_available_pdf_engines_for_format("pdf", &app_handle))
+}
+
+/// Check which PDF engines are available for a specific output format
+fn check_available_pdf_engines_for_format(
+    output_format: &str,
+    app_handle: &tauri::AppHandle,
+) -> Vec<String> {
     let mut available = Vec::new();
-    
+    let engines = get_pdf_engines_for_format(output_format);
+
     for engine in engines {
-        if crate::utils::create_hidden_command(engine)
+        // Check bundled engines first (currently only typst)
+        if engine == "typst" {
+            if let Some(bundled_typst) = get_best_typst_path(app_handle) {
+                if !available.contains(&bundled_typst) {
+                    available.push(bundled_typst);
+                }
+                continue;
+            }
+        }
+
+        // Check system engines
+        let result = crate::utils::create_hidden_command(engine)
             .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-        {
-            available.push(engine.to_string());
+            .output();
+
+        match result {
+            Ok(output) => {
+                if output.status.success() {
+                    available.push(engine.to_string());
+                }
+            }
+            Err(_) => {
+                // Engine not available, continue to next
+            }
         }
     }
-    
+
     available
+}
+
+/// Get the best available typst path (bundled or system) - returns full path when possible
+fn get_best_typst_path(app_handle: &tauri::AppHandle) -> Option<String> {
+    // Check bundled typst in multiple possible locations
+    let exe_name = if cfg!(windows) { "typst.exe" } else { "typst" };
+
+    // Try different possible resource directories
+    let mut possible_resource_dirs = Vec::new();
+
+    // 1. Try the official resource directory (works in production)
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        possible_resource_dirs.push(resource_dir);
+    }
+
+    // 2. Try relative to the current working directory (development)
+    if let Ok(current_dir) = std::env::current_dir() {
+        // If we're already in src-tauri directory, don't add it again
+        let resources_path = if current_dir.file_name() == Some(std::ffi::OsStr::new("src-tauri")) {
+            current_dir.join("resources")
+        } else {
+            current_dir.join("src-tauri").join("resources")
+        };
+        possible_resource_dirs.push(resources_path);
+    }
+
+    // 3. Try relative to the executable directory
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_parent) = exe_path.parent() {
+            possible_resource_dirs.push(exe_parent.join("resources"));
+        }
+    }
+
+    for resource_dir in possible_resource_dirs {
+        let typst_dir = resource_dir.join("typst");
+
+        // Try direct path first
+        let direct_path = typst_dir.join(&exe_name);
+        if direct_path.exists() {
+            if validate_typst_executable(&direct_path.to_string_lossy()) {
+                let path_str = direct_path.to_string_lossy().to_string();
+                return Some(path_str);
+            }
+        }
+
+        // Try to find typst.exe in subdirectories (for extracted archives)
+        if typst_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&typst_dir) {
+                for entry in entries.flatten() {
+                    if entry.path().is_dir() {
+                        let nested_typst = entry.path().join(&exe_name);
+
+                        if nested_typst.exists() {
+                            if validate_typst_executable(&nested_typst.to_string_lossy()) {
+                                let path_str = nested_typst.to_string_lossy().to_string();
+                                return Some(path_str);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback to system typst - use command name only
+
+    let result = crate::utils::create_hidden_command("typst")
+        .arg("--version")
+        .output();
+
+    match result {
+        Ok(output) => {
+            if output.status.success() {
+                Some("typst".to_string())
+            } else {
+                None
+            }
+        }
+        Err(_) => None,
+    }
 }
 
 /// Extract clean version number from version string
@@ -604,91 +732,47 @@ pub async fn check_pandoc_version() -> Result<String, String> {
     Ok(extract_version_number(&info.version))
 }
 
-/// Get the bundled Pandoc directory path
-fn get_bundled_pandoc_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
-    
-    Ok(app_data_dir.join("pandoc-bundled"))
-}
-
-/// Setup bundled Pandoc from build-time resources
+/// Setup managed Pandoc from build-time resources (legacy function kept for compatibility)
 #[tauri::command]
 pub async fn setup_bundled_pandoc(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let bundled_dir = get_bundled_pandoc_dir(&app_handle)?;
-    
-    // Create directory if it doesn't exist
-    std::fs::create_dir_all(&bundled_dir)
-        .map_err(|e| format!("Failed to create bundled directory: {}", e))?;
-    
-    // Check if Pandoc is already set up
-    let pandoc_path = get_bundled_pandoc_executable_path(&app_handle)?;
-    if std::path::Path::new(&pandoc_path).exists() {
-        return Ok(format!("Bundled Pandoc already available at: {}", pandoc_path));
+    let managed_source = crate::manager::PandocManager::new(crate::manager::PandocSource::Managed);
+
+    if let Some(path) = managed_source.get_executable_path(&app_handle) {
+        Ok(format!("Managed Pandoc available at: {}", path.display()))
+    } else {
+        Err("No managed Pandoc found. This build may not include Pandoc.".to_string())
     }
-    
-    // Check if we have a bundled Pandoc resource
-    if let Ok(bundled_path) = std::env::var("PANDOC_BUNDLED_PATH") {
-        if std::path::Path::new(&bundled_path).exists() {
-            // Extract the bundled Pandoc
-            let extract_dir = bundled_dir.to_string_lossy().to_string();
-            let _extracted_path = crate::manager::extract_pandoc_archive(
-                bundled_path.clone(),
-                extract_dir
-            ).await?;
-            
-            return Ok(format!("Successfully set up bundled Pandoc from: {}", bundled_path));
-        }
-    }
-    
-    Err("No bundled Pandoc found. This build may not include Pandoc.".to_string())
 }
 
-/// Get the path to bundled Pandoc executable
+/// Get the path to managed Pandoc executable (legacy function kept for compatibility)
 #[tauri::command]
 pub async fn get_bundled_pandoc_path(app_handle: tauri::AppHandle) -> Result<String, String> {
-    get_bundled_pandoc_executable_path(&app_handle)
+    let managed_source = crate::manager::PandocManager::new(crate::manager::PandocSource::Managed);
+
+    if let Some(path) = managed_source.get_executable_path(&app_handle) {
+        Ok(path.to_string_lossy().to_string())
+    } else {
+        Err("Managed Pandoc executable not found".to_string())
+    }
 }
 
-/// Get the expected path to bundled Pandoc executable
-fn get_bundled_pandoc_executable_path(app_handle: &tauri::AppHandle) -> Result<String, String> {
-    let bundled_dir = get_bundled_pandoc_dir(app_handle)?;
-    let exe_name = if cfg!(target_os = "windows") {
-        "pandoc.exe"
-    } else {
-        "pandoc"
-    };
-    
-    // Look for pandoc in bin subdirectory (common in extracted archives)
-    let bin_path = bundled_dir.join("bin").join(exe_name);
-    if bin_path.exists() {
-        return Ok(bin_path.to_string_lossy().to_string());
-    }
-    
-    // Look for pandoc in root of bundled directory
-    let root_path = bundled_dir.join(exe_name);
-    if root_path.exists() {
-        return Ok(root_path.to_string_lossy().to_string());
-    }
-    
-    // Look for pandoc in any subdirectory (pandoc archives often have version dirs)
-    if let Ok(entries) = std::fs::read_dir(&bundled_dir) {
-        for entry in entries.flatten() {
-            if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                let sub_bin = entry.path().join("bin").join(exe_name);
-                if sub_bin.exists() {
-                    return Ok(sub_bin.to_string_lossy().to_string());
-                }
-                
-                let sub_root = entry.path().join(exe_name);
-                if sub_root.exists() {
-                    return Ok(sub_root.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-    
-    Err("Bundled Pandoc executable not found".to_string())
+/// Check if managed typst is available
+#[tauri::command]
+pub async fn check_bundled_typst(app_handle: tauri::AppHandle) -> Result<bool, String> {
+    Ok(get_best_typst_path(&app_handle).is_some())
+}
+
+/// Get the path to best available typst executable
+#[tauri::command]
+pub async fn get_bundled_typst_path(app_handle: tauri::AppHandle) -> Result<String, String> {
+    get_best_typst_path(&app_handle).ok_or_else(|| "Typst executable not found".to_string())
+}
+
+/// Validate if a Typst executable is working
+fn validate_typst_executable(path: &str) -> bool {
+    crate::utils::create_hidden_command(path)
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
