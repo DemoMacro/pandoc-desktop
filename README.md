@@ -1,6 +1,6 @@
-# Pandoc Desktop
-
 <div align="center">
+
+# Pandoc Desktop
 
 ![Pandoc Desktop Logo](public/pandoc-banner.svg)
 
