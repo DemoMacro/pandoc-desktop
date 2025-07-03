@@ -65,7 +65,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workdir: "./src-tauri"
+          workspaces: "./src-tauri -> target"
           cache-on-failure: true
 
       - name: Install dependencies (ubuntu only)
