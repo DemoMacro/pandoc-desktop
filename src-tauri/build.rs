@@ -144,33 +144,7 @@ fn get_pandoc_download_url(
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Use UNGH API for better reliability and mirroring
     let api_url = "https://ungh.cc/repos/jgm/pandoc/releases/latest";
-    let response = ureq::get(api_url).call()?;
-    let json: serde_json::Value = response.into_json()?;
-
-    let assets = json["release"]["assets"]
-        .as_array()
-        .ok_or("No assets found in pandoc release")?;
-
-    // Updated asset patterns based on pandoc 3.7.0.2 release
-    let patterns = get_pandoc_asset_patterns(target_os, target_arch);
-
-    for pattern in &patterns {
-        for asset in assets {
-            let download_url = asset["downloadUrl"].as_str().unwrap_or("");
-            let filename = download_url.split('/').last().unwrap_or("");
-
-            if filename.contains(pattern) {
-                println!("cargo:warning=Found matching pandoc asset: {}", filename);
-                return Ok(download_url.to_string());
-            }
-        }
-    }
-
-    Err(format!(
-        "No matching pandoc asset found for {}-{}",
-        target_os, target_arch
-    )
-    .into())
+    find_asset_download_url(api_url, &get_pandoc_asset_patterns(target_os, target_arch))
 }
 
 fn get_typst_download_url(
@@ -179,44 +153,59 @@ fn get_typst_download_url(
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Use UNGH API for Typst (same as Pandoc)
     let api_url = "https://ungh.cc/repos/typst/typst/releases/latest";
+    find_asset_download_url(api_url, &[get_typst_asset_pattern(target_os, target_arch)])
+}
+
+/// Unified asset finder for UNGH API responses
+fn find_asset_download_url(
+    api_url: &str,
+    patterns: &[String],
+) -> Result<String, Box<dyn std::error::Error>> {
     let response = ureq::get(api_url).call()?;
     let json: serde_json::Value = response.into_json()?;
 
-    // UNGH wraps the release in a "release" field, and assets in "assets"
-    let release = &json["release"];
-    let assets = release["assets"]
+    let assets = json["release"]["assets"]
         .as_array()
-        .ok_or("No assets found in typst release")?;
+        .ok_or_else(|| format!("No assets found at {}", api_url))?;
 
-    // Get the correct pattern for Typst assets
-    let pattern = get_typst_asset_pattern(target_os, target_arch);
+    for pattern in patterns {
+        for asset in assets {
+            // Prioritize asset 'name' field, fallback to parsing 'downloadUrl'
+            let asset_name = asset["name"].as_str().unwrap_or_else(|| {
+                asset["downloadUrl"]
+                    .as_str()
+                    .unwrap_or("")
+                    .split('/')
+                    .last()
+                    .unwrap_or("")
+            });
 
-    for asset in assets {
-        let name = asset["name"].as_str().unwrap_or("");
-        let download_url = asset["downloadUrl"].as_str().unwrap_or("");
-
-        if name.contains(&pattern) {
-            println!("cargo:warning=Found matching typst asset: {}", name);
-            return Ok(download_url.to_string());
+            if asset_name.contains(pattern) {
+                if let Some(download_url) = asset["downloadUrl"].as_str() {
+                    println!("cargo:warning=Found matching asset: {}", asset_name);
+                    return Ok(download_url.to_string());
+                }
+            }
         }
     }
 
-    Err(format!("No matching typst asset found for pattern: {}", pattern).into())
+    Err(format!("No matching asset found for patterns: {:?}", patterns).into())
 }
 
 fn get_pandoc_asset_patterns(target_os: &str, target_arch: &str) -> Vec<String> {
     // Based on pandoc release assets like 'pandoc-3.7.0.2-x86_64-macOS.zip'
+    // The order matters: prefer .zip over .pkg
     match (target_os, target_arch) {
-        ("windows", "x86_64") => vec!["windows-x86_64".to_string()],
-        ("macos", "aarch64") => vec!["arm64-macOS".to_string()],
-        ("macos", "x86_64") => vec!["x86_64-macOS".to_string()],
-        ("linux", "aarch64") => vec!["linux-arm64".to_string()],
-        ("linux", "x86_64") => vec!["linux-amd64".to_string()],
+        ("windows", "x86_64") => vec!["windows-x86_64.zip".to_string()],
+        ("macos", "aarch64") => vec!["arm64-macOS.zip".to_string(), "macOS.zip".to_string()],
+        ("macos", "x86_64") => vec!["x86_64-macOS.zip".to_string(), "macOS.zip".to_string()],
+        ("linux", "aarch64") => vec!["linux-arm64.tar.gz".to_string()],
+        ("linux", "x86_64") => vec!["linux-amd64.tar.gz".to_string()],
         // Fallbacks
-        ("windows", _) => vec!["windows-x86_64".to_string()],
-        ("macos", _) => vec!["macOS".to_string()],
-        ("linux", _) => vec!["linux-amd64".to_string()],
-        _ => vec!["linux-amd64".to_string()],
+        ("windows", _) => vec!["windows-x86_64.zip".to_string()],
+        ("macos", _) => vec!["macOS.zip".to_string(), "macOS.pkg".to_string()],
+        ("linux", _) => vec!["linux-amd64.tar.gz".to_string()],
+        _ => vec!["linux-amd64.tar.gz".to_string()],
     }
 }
 

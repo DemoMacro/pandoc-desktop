@@ -779,7 +779,7 @@ pub async fn download_tool(
             let version = if let Some(v) = version {
                 v
             } else {
-                let latest = get_latest_typst_release(&config).await?;
+                let latest = get_latest_typst_release().await?;
                 latest.tag_name
             };
             download_typst_internal(version, target_dir, config).await
@@ -854,7 +854,7 @@ async fn download_pandoc_internal(
 }
 
 /// Get latest Typst release information
-async fn get_latest_typst_release(config: &DownloadConfig) -> Result<GithubRelease, String> {
+async fn get_latest_typst_release() -> Result<GithubRelease, String> {
     // Use UNGH API for Typst (same as Pandoc)
     let url = format!("{}/{}/releases/latest", UNGH_API_BASE, TYPST_REPO);
 
@@ -893,7 +893,7 @@ async fn download_typst_internal(
     download_dir: PathBuf,
     config: DownloadConfig,
 ) -> Result<String, String> {
-    let release = get_latest_typst_release(&config).await?;
+    let release = get_latest_typst_release().await?;
 
     // Find the appropriate asset for the target platform
     let asset_pattern = get_typst_asset_pattern(&config.target_os, &config.target_arch);
@@ -1056,8 +1056,7 @@ pub async fn download_typst(
 /// Get latest Typst release information (public command)
 #[tauri::command]
 pub async fn get_latest_typst_release_info() -> Result<GithubRelease, String> {
-    let config = DownloadConfig::current_platform();
-    get_latest_typst_release(&config).await
+    get_latest_typst_release().await
 }
 
 /// Update managed pandoc by downloading latest version  
@@ -1103,7 +1102,7 @@ pub async fn update_managed_pandoc(app_handle: AppHandle) -> Result<String, Stri
 pub async fn update_managed_typst(app_handle: AppHandle) -> Result<String, String> {
     // Get latest release
     let config = DownloadConfig::current_platform();
-    let latest_release = get_latest_typst_release(&config).await?;
+    let latest_release = get_latest_typst_release().await?;
     let version = latest_release.tag_name.clone();
 
     // Get resource directory
