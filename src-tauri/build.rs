@@ -177,14 +177,14 @@ fn get_typst_download_url(
     target_os: &str,
     target_arch: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    // Use GitHub API directly for Typst
-    let api_url = "https://api.github.com/repos/typst/typst/releases/latest";
-    let response = ureq::get(api_url)
-        .set("User-Agent", "pandoc-desktop")
-        .call()?;
+    // Use UNGH API for Typst (same as Pandoc)
+    let api_url = "https://ungh.cc/repos/typst/typst/releases/latest";
+    let response = ureq::get(api_url).call()?;
     let json: serde_json::Value = response.into_json()?;
 
-    let assets = json["assets"]
+    // UNGH wraps the release in a "release" field, and assets in "assets"
+    let release = &json["release"];
+    let assets = release["assets"]
         .as_array()
         .ok_or("No assets found in typst release")?;
 
@@ -193,7 +193,7 @@ fn get_typst_download_url(
 
     for asset in assets {
         let name = asset["name"].as_str().unwrap_or("");
-        let download_url = asset["browser_download_url"].as_str().unwrap_or("");
+        let download_url = asset["downloadUrl"].as_str().unwrap_or("");
 
         if name.contains(&pattern) {
             println!("cargo:warning=Found matching typst asset: {}", name);
@@ -205,34 +205,30 @@ fn get_typst_download_url(
 }
 
 fn get_pandoc_asset_patterns(target_os: &str, target_arch: &str) -> Vec<String> {
-    // Based on actual pandoc 3.7.0.2 release assets
+    // Based on pandoc release assets like 'pandoc-3.7.0.2-x86_64-macOS.zip'
     match (target_os, target_arch) {
-        ("windows", "x86_64") => vec!["windows-x86_64.zip".to_string()],
-        ("windows", _) => vec!["windows-x86_64.zip".to_string()],
-        ("macos", "aarch64") => vec!["arm64-macOS.zip".to_string(), "macOS.zip".to_string()],
-        ("macos", "x86_64") => vec!["x86_64-macOS.zip".to_string(), "macOS.zip".to_string()],
-        ("macos", _) => vec!["macOS.zip".to_string()],
-        ("linux", "aarch64") => vec![
-            "linux-arm64.tar.gz".to_string(),
-            "linux-amd64.tar.gz".to_string(),
-        ],
-        ("linux", "x86_64") => vec!["linux-amd64.tar.gz".to_string()],
-        ("linux", _) => vec!["linux-amd64.tar.gz".to_string()],
-        _ => vec!["linux-amd64.tar.gz".to_string()], // Default fallback
+        ("windows", "x86_64") => vec!["windows-x86_64".to_string()],
+        ("macos", "aarch64") => vec!["arm64-macOS".to_string()],
+        ("macos", "x86_64") => vec!["x86_64-macOS".to_string()],
+        ("linux", "aarch64") => vec!["linux-arm64".to_string()],
+        ("linux", "x86_64") => vec!["linux-amd64".to_string()],
+        // Fallbacks
+        ("windows", _) => vec!["windows-x86_64".to_string()],
+        ("macos", _) => vec!["macOS".to_string()],
+        ("linux", _) => vec!["linux-amd64".to_string()],
+        _ => vec!["linux-amd64".to_string()],
     }
 }
 
 fn get_typst_asset_pattern(target_os: &str, target_arch: &str) -> String {
-    // Based on actual typst v0.13.1 release assets
+    // Based on typst release assets like 'typst-v0.13.1-x86_64-apple-darwin.tar.gz'
     match (target_os, target_arch) {
         ("windows", "x86_64") => "x86_64-pc-windows-msvc".to_string(),
-        ("windows", _) => "x86_64-pc-windows-msvc".to_string(),
         ("macos", "aarch64") => "aarch64-apple-darwin".to_string(),
         ("macos", "x86_64") => "x86_64-apple-darwin".to_string(),
-        ("macos", _) => "x86_64-apple-darwin".to_string(),
-        ("linux", "aarch64") => "aarch64-unknown-linux-musl".to_string(),
         ("linux", "x86_64") => "x86_64-unknown-linux-musl".to_string(),
-        ("linux", _) => "x86_64-unknown-linux-musl".to_string(),
+        ("linux", "aarch64") => "aarch64-unknown-linux-musl".to_string(),
+        // Fallbacks
         _ => "x86_64-unknown-linux-musl".to_string(),
     }
 }

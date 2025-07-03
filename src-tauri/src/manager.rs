@@ -855,11 +855,8 @@ async fn download_pandoc_internal(
 
 /// Get latest Typst release information
 async fn get_latest_typst_release(config: &DownloadConfig) -> Result<GithubRelease, String> {
-    // Use GitHub API directly for Typst since UNGH might not have it
-    let url = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        TYPST_REPO
-    );
+    // Use UNGH API for Typst (same as Pandoc)
+    let url = format!("{}/{}/releases/latest", UNGH_API_BASE, TYPST_REPO);
 
     let response = reqwest::get(&url)
         .await
@@ -867,7 +864,7 @@ async fn get_latest_typst_release(config: &DownloadConfig) -> Result<GithubRelea
 
     if !response.status().is_success() {
         return Err(format!(
-            "GitHub API request failed with status: {}",
+            "UNGH API request failed with status: {}",
             response.status()
         ));
     }
@@ -877,52 +874,17 @@ async fn get_latest_typst_release(config: &DownloadConfig) -> Result<GithubRelea
         .await
         .map_err(|e| format!("Failed to read response: {}", e))?;
 
-    let release_data: serde_json::Value =
+    let api_response: serde_json::Value =
         serde_json::from_str(&response_text).map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
-    parse_github_release(release_data, config)
-}
+    // UNGH wraps the release in a "release" field
+    let release_data = api_response["release"].clone();
 
-/// Parse GitHub API response to GithubRelease
-fn parse_github_release(
-    data: serde_json::Value,
-    _config: &DownloadConfig,
-) -> Result<GithubRelease, String> {
-    let tag_name = data["tag_name"].as_str().unwrap_or("").to_string();
-    let name = data["name"].as_str().unwrap_or(&tag_name).to_string();
-    let body = data["body"].as_str().unwrap_or("").to_string();
-    let published_at = data["published_at"].as_str().unwrap_or("").to_string();
-
-    // Parse actual assets from GitHub API
-    let empty_vec = vec![];
-    let assets_data = data["assets"].as_array().unwrap_or(&empty_vec);
-    let mut assets = Vec::new();
-
-    for asset_data in assets_data {
-        if let (Some(name), Some(download_url), Some(size)) = (
-            asset_data["name"].as_str(),
-            asset_data["browser_download_url"].as_str(),
-            asset_data["size"].as_u64(),
-        ) {
-            assets.push(GithubAsset {
-                name: name.to_string(),
-                download_url: download_url.to_string(),
-                size,
-                content_type: asset_data["content_type"]
-                    .as_str()
-                    .unwrap_or("application/octet-stream")
-                    .to_string(),
-            });
-        }
+    if release_data.is_null() {
+        return Err("No release data found in response".to_string());
     }
 
-    Ok(GithubRelease {
-        tag_name,
-        name,
-        body,
-        published_at,
-        assets,
-    })
+    parse_ungh_release(release_data)
 }
 
 /// Internal typst download function
@@ -981,37 +943,32 @@ async fn download_typst_internal(
 
 /// Get pandoc asset patterns for specific platform
 fn get_pandoc_asset_patterns_for_platform(target_os: &str, target_arch: &str) -> Vec<String> {
+    // Based on pandoc release assets like 'pandoc-3.7.0.2-x86_64-macOS.zip'
     match (target_os, target_arch) {
-        ("windows", "x86_64") => vec!["windows-x86_64.zip".to_string()],
-        ("windows", _) => vec!["windows-x86_64.zip".to_string()], // Default to x86_64
-        ("macos", "aarch64") => vec!["arm64-macOS.zip".to_string(), "macOS.zip".to_string()],
-        ("macos", "x86_64") => vec!["x86_64-macOS.zip".to_string(), "macOS.zip".to_string()],
-        ("macos", _) => vec!["macOS.zip".to_string()], // Generic macOS
-        ("linux", "aarch64") => vec![
-            "linux-arm64.tar.gz".to_string(),
-            "linux-amd64.tar.gz".to_string(),
-        ],
-        ("linux", "x86_64") => vec!["linux-amd64.tar.gz".to_string()],
-        ("linux", _) => vec!["linux-amd64.tar.gz".to_string()], // Default to amd64
-        _ => crate::utils::get_pandoc_asset_patterns()
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect(), // Fallback to original logic
+        ("windows", "x86_64") => vec!["windows-x86_64".to_string()],
+        ("macos", "aarch64") => vec!["arm64-macOS".to_string()],
+        ("macos", "x86_64") => vec!["x86_64-macOS".to_string()],
+        ("linux", "aarch64") => vec!["linux-arm64".to_string()],
+        ("linux", "x86_64") => vec!["linux-amd64".to_string()],
+        // Fallbacks
+        ("windows", _) => vec!["windows-x86_64".to_string()],
+        ("macos", _) => vec!["macOS".to_string()],
+        ("linux", _) => vec!["linux-amd64".to_string()],
+        _ => vec!["linux-amd64".to_string()],
     }
 }
 
 /// Get typst asset pattern for specific platform
 fn get_typst_asset_pattern(target_os: &str, target_arch: &str) -> String {
+    // Based on typst release assets like 'typst-v0.13.1-x86_64-apple-darwin.tar.gz'
     match (target_os, target_arch) {
         ("windows", "x86_64") => "x86_64-pc-windows-msvc".to_string(),
-        ("windows", _) => "x86_64-pc-windows-msvc".to_string(), // Default to x86_64
         ("macos", "aarch64") => "aarch64-apple-darwin".to_string(),
         ("macos", "x86_64") => "x86_64-apple-darwin".to_string(),
-        ("macos", _) => "x86_64-apple-darwin".to_string(), // Default to x86_64
-        ("linux", "aarch64") => "aarch64-unknown-linux-musl".to_string(),
         ("linux", "x86_64") => "x86_64-unknown-linux-musl".to_string(),
-        ("linux", _) => "x86_64-unknown-linux-musl".to_string(), // Default to x86_64
-        _ => "x86_64-unknown-linux-musl".to_string(),            // Generic fallback
+        ("linux", "aarch64") => "aarch64-unknown-linux-musl".to_string(),
+        // Fallbacks
+        _ => "x86_64-unknown-linux-musl".to_string(),
     }
 }
 
