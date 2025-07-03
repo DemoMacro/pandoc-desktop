@@ -180,14 +180,17 @@ pub fn format_file_size(bytes: u64) -> String {
 
 /// Create a hidden command to avoid PowerShell popup on Windows
 pub fn create_hidden_command(program: &str) -> Command {
-    let mut cmd = Command::new(program);
-
     #[cfg(target_os = "windows")]
     {
+        let mut cmd = Command::new(program);
         use std::os::windows::process::CommandExt;
         // Use CREATE_NO_WINDOW flag to hide the console window
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        cmd
     }
-
-    cmd
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new(program)
+    }
 }

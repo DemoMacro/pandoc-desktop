@@ -48,6 +48,19 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'x86_64-apple-darwin' || '' }}
+
+      - name: Install additional Rust targets for macOS
+        if: matrix.platform == 'macos-latest'
+        run: |
+          rustup target add x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workdir: "./src-tauri"
+          cache-on-failure: true
 
       - name: Install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
@@ -67,3 +80,12 @@ jobs:
         with:
           args: ${{ matrix.args }}
           tauriScript: pnpm tauri
+        id: tauri
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pandoc-desktop-${{ matrix.platform }}-${{ github.sha }}
+          path: src-tauri/target/release/bundle/
+          retention-days: 30
